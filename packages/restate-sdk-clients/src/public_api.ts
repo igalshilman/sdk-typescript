@@ -20,12 +20,9 @@ export {
   Ingress,
   ConnectionOpts,
   IngressClient,
-  IngressSendClient,
   IngressWorkflowClient,
   Opts,
   IngresCallOptions,
-  SendOpts,
-  IngresSendOptions,
 } from "./api";
 
 export { connect } from "./ingress";

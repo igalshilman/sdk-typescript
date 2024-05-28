@@ -25,6 +25,7 @@ const ingress = restate.connect({ url: "http://localhost:8080" });
 
 const simpleCall = async (name: string) => {
   const greeter = ingress.serviceClient(Greeter);
+
   const greeting = await greeter.greet(name);
 
   console.log(greeting);
@@ -78,8 +79,8 @@ const delayedCall = async (name: string) => {
   });
 
   const greeting = await ingress
-    .serviceSendClient(Greeter)
-    .greet(name, restate.SendOpts.from({ delay: 1000 }));
+    .serviceClient(Greeter)
+    .greet(name, restate.Opts.from({ delay: 1000 }));
 
   console.log(greeting);
 };

@@ -31,21 +31,6 @@ export interface Ingress {
   ): IngressClient<M>;
 
   /**
-   * Create a client from a {@link ServiceDefinition}.
-   */
-  serviceSendClient<M, P extends string = string>(
-    opts: ServiceDefinition<P, M>
-  ): IngressSendClient<M>;
-
-  /**
-   * Create a client from a {@link VirtualObjectDefinition}.
-   */
-  objectSendClient<M, P extends string = string>(
-    opts: VirtualObjectDefinition<P, M>,
-    key: string
-  ): IngressSendClient<M>;
-
-  /**
    * Resolve an awakeable from the ingress client.
    */
   resolveAwakeable<T>(id: string, payload?: T): Promise<void>;
@@ -68,40 +53,37 @@ export interface IngresCallOptions {
    * Headers to attach to the request.
    */
   headers?: Record<string, string>;
-}
 
-export interface IngresSendOptions extends IngresCallOptions {
-  /**
-   * If set, the invocation will be executed after the provided delay. In milliseconds.
-   */
+  send?: boolean;
+
   delay?: number;
 }
 
-export class Opts {
-  public static from(opts: IngresCallOptions): Opts {
-    return new Opts(opts);
+export class Opts<T extends IngresCallOptions = any> {
+  public static from<T extends IngresCallOptions = IngresCallOptions>(
+    opts: T
+  ): Opts<T> {
+    return new Opts<T>(opts);
   }
 
-  constructor(readonly opts: IngresCallOptions) {}
+  constructor(readonly opts: T) {}
 }
 
-export class SendOpts {
-  public static from(opts: IngresSendOptions): SendOpts {
-    return new SendOpts(opts);
-  }
-
-  delay(): number | undefined {
-    return this.opts.delay;
-  }
-
-  constructor(readonly opts: IngresSendOptions) {}
-}
+export type SendOr<T, O> = O extends Opts<infer OO>
+  ? OO["send"] extends true
+    ? SendResponse
+    : OO["delay"] extends number
+    ? SendResponse
+    : T
+  : T;
 
 export type IngressClient<M> = {
   [K in keyof M as M[K] extends never ? never : K]: M[K] extends (
     ...args: infer P
   ) => PromiseLike<infer O>
-    ? (...args: [...P, ...[opts?: Opts]]) => PromiseLike<O>
+    ? <Options = unknown>(
+        ...args: [...P, ...[opts?: Options]]
+      ) => PromiseLike<SendOr<O, Options>>
     : never;
 };
 
@@ -154,14 +136,6 @@ export type IngressWorkflowClient<M> = Omit<
 export type SendResponse = {
   invocationId: string;
   status: "Accepted" | "PreviouslyAccepted";
-};
-
-export type IngressSendClient<M> = {
-  [K in keyof M as M[K] extends never ? never : K]: M[K] extends (
-    ...args: infer P
-  ) => unknown
-    ? (...args: [...P, ...[opts?: SendOpts]]) => Promise<SendResponse>
-    : never;
 };
 
 export type ConnectionOpts = {

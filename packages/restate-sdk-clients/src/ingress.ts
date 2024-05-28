@@ -18,14 +18,13 @@ import type {
   ConnectionOpts,
   Ingress,
   IngressClient,
-  IngressSendClient,
   IngressWorkflowClient,
   Output,
   SendResponse,
   WorkflowSubmission,
 } from "./api";
 
-import { Opts, SendOpts } from "./api";
+import { Opts } from "./api";
 
 /**
  * Connect to the restate Ingress
@@ -52,17 +51,17 @@ type InvocationParameters<I> = {
   handler: string;
   key?: string;
   send?: boolean;
-  opts?: Opts | SendOpts;
+  opts?: Opts;
   parameter?: I;
   method?: string;
 };
 
 function optsFromArgs(args: unknown[]): {
   parameter?: unknown;
-  opts?: Opts | SendOpts;
+  opts?: Opts;
 } {
   let parameter: unknown | undefined;
-  let opts: Opts | SendOpts | undefined;
+  let opts: Opts | undefined;
   switch (args.length) {
     case 0: {
       break;
@@ -70,8 +69,6 @@ function optsFromArgs(args: unknown[]): {
     case 1: {
       if (args[0] instanceof Opts) {
         opts = args[0] as Opts;
-      } else if (args[0] instanceof SendOpts) {
-        opts = args[0] as SendOpts;
       } else {
         parameter = args[0];
       }
@@ -81,8 +78,6 @@ function optsFromArgs(args: unknown[]): {
       parameter = args[0];
       if (args[1] instanceof Opts) {
         opts = args[1] as Opts;
-      } else if (args[1] instanceof SendOpts) {
-        opts = args[1] as SendOpts;
       } else {
         throw new TypeError(
           "The second argument must be either Opts or SendOpts"
@@ -127,7 +122,7 @@ const doComponentInvocation = async <I, O>(
   //
   fragments.push(params.handler);
   if (params.send ?? false) {
-    if (params.opts instanceof SendOpts) {
+    if (params.opts?.opts.send) {
       const sendString = computeDelayAsIso(params.opts);
       fragments.push(sendString);
     } else {
@@ -214,7 +209,7 @@ const doWorkflowHandleCall = async <O>(
 class HttpIngress implements Ingress {
   constructor(private readonly opts: ConnectionOpts) {}
 
-  private proxy(component: string, key?: string, send?: boolean) {
+  private proxy(component: string, key?: string) {
     return new Proxy(
       {},
       {
@@ -222,6 +217,7 @@ class HttpIngress implements Ingress {
           const handler = prop as string;
           return (...args: unknown[]) => {
             const { parameter, opts } = optsFromArgs(args);
+            const send = opts?.opts.send;
             return doComponentInvocation(this.opts, {
               component,
               handler,
@@ -331,19 +327,6 @@ class HttpIngress implements Ingress {
     ) as IngressWorkflowClient<M>;
   }
 
-  objectSendClient<P extends string, M>(
-    opts: VirtualObjectDefinition<P, M>,
-    key: string
-  ): IngressSendClient<M> {
-    return this.proxy(opts.name, key, true) as IngressSendClient<M>;
-  }
-
-  serviceSendClient<P extends string, M>(
-    opts: ServiceDefinition<P, M>
-  ): IngressSendClient<M> {
-    return this.proxy(opts.name, undefined, true) as IngressSendClient<M>;
-  }
-
   async resolveAwakeable<T>(
     id: string,
     payload?: T | undefined
@@ -391,8 +374,8 @@ class HttpIngress implements Ingress {
   }
 }
 
-function computeDelayAsIso(opts: SendOpts): string {
-  const delay = opts.delay();
+function computeDelayAsIso(opts: Opts): string {
+  const delay = opts.opts.delay;
   if (!delay) {
     return "send";
   }
