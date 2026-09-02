@@ -1,0 +1,83 @@
+/*
+ * Copyright (c) 2023-2026 - Restate Software, Inc., Restate GmbH
+ *
+ * This file is part of the Restate SDK for Node.js/TypeScript,
+ * which is released under the MIT license.
+ *
+ * You can find a copy of the license in file LICENSE in the root
+ * directory of this repository or package, or at
+ * https://github.com/restatedev/sdk-typescript/blob/main/LICENSE
+ */
+
+// Tier 3: sagas. Two shapes — explicit `runExit` + compensation, and
+// `acquireRelease`, whose finalizers also run when the invocation is cancelled.
+//
+//   curl localhost:8080/saga/process     --json '{"orderId":"o-1","fail":false}'
+//   curl localhost:8080/saga/process     --json '{"orderId":"o-2","fail":true}'
+//   curl localhost:8080/saga/scoped      --json '"o-3"'
+
+import { Effect, Exit, Schema } from "effect";
+import * as restate from "@restatedev/restate-sdk-effect";
+import { chargeCard, refundCard, releaseStock, reserveStock } from "./fakes.js";
+
+const Order = Schema.Struct({
+  orderId: Schema.String,
+  fail: Schema.Boolean,
+});
+
+export const saga = restate.service({
+  name: "saga",
+  handlers: {
+    // Observe each step's outcome and compensate the ones that succeeded.
+    process: restate.handler({ input: Order, output: Schema.String }, (order) =>
+      Effect.gen(function* () {
+        const reservation = yield* restate.run(
+          "reserve",
+          reserveStock(order.orderId)
+        );
+
+        const charged = yield* restate.runExit(
+          "charge",
+          order.fail
+            ? Effect.die(new Error("card declined"))
+            : chargeCard(order.orderId),
+          { retry: { maxAttempts: 1 } }
+        );
+
+        if (Exit.isFailure(charged)) {
+          const released = yield* restate.run(
+            "release",
+            releaseStock(reservation)
+          );
+          return `compensated: ${released}`;
+        }
+        return `ok: ${charged.value}`;
+      })
+    ),
+
+    // The same thing with scopes: the release runs on *any* exit — success,
+    // failure, or the invocation being cancelled.
+    scoped: restate.handler(
+      { input: Schema.String, output: Schema.String },
+      (orderId) =>
+        Effect.gen(function* () {
+          const receipt = yield* Effect.acquireRelease(
+            restate.run("charge", chargeCard(orderId)),
+            (receipt, exit) =>
+              Exit.isSuccess(exit)
+                ? Effect.void
+                : // A finalizer cannot fail: a failing refund is a defect, and
+                  // Restate retries the attempt.
+                  Effect.asVoid(
+                    Effect.orDie(restate.run("refund", refundCard(receipt)))
+                  )
+          );
+          const reservation = yield* restate.run(
+            "reserve",
+            reserveStock(orderId)
+          );
+          return `${receipt} / ${reservation}`;
+        }).pipe(Effect.scoped)
+    ),
+  },
+});

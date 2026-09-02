@@ -24,6 +24,9 @@
       "@restatedev/restate-sdk-core": [
         "packages/libs/restate-sdk-core/src/index.ts"
       ],
+      "@restatedev/restate-sdk-effect": [
+        "packages/libs/restate-sdk-effect/src/index.ts"
+      ],
       "@restatedev/restate-sdk-gen": [
         "packages/libs/restate-sdk-gen/src/index.ts"
       ],
@@ -54,6 +57,9 @@
     },
     {
       "path": "packages/libs/restate-sdk-core"
+    },
+    {
+      "path": "packages/libs/restate-sdk-effect"
     },
     {
       "path": "packages/libs/restate-sdk-gen"

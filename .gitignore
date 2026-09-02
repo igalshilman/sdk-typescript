@@ -18,6 +18,7 @@ packages/*/buf.lock
 test-report
 restate-sdk-test-suite.jar
 sdk-tests.jar
+sdk-tests.jar.version
 
 .restate
 

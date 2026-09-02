@@ -7,6 +7,7 @@ allowBuilds:
   cpu-features: false
   esbuild: false
   heapdump: true
+  msgpackr-extract: false
   protobufjs: false
   sharp: false
   ssh2: false
@@ -14,6 +15,11 @@ allowBuilds:
   workerd: false
 
 catalog:
+  # Effect 4 is pre-release: dev and tests pin one exact RC so runtime-internal
+  # churn (scheduler/dispatcher shape, Schema API) surfaces as a deliberate bump
+  # of this line. @restatedev/restate-sdk-effect's peer range stays wider
+  # (>=4.0.0-rc.112 <5). See packages/libs/restate-sdk-effect/DESIGN.md §9.
+  effect: 4.0.0-rc.112
   zod: ^4.2.0
 
 # Security overrides: force patched versions of transitive/dev dependencies flagged by
@@ -35,6 +41,7 @@ overrides:
 ignoredBuiltDependencies:
   - cpu-features
   - esbuild
+  - msgpackr-extract
   - protobufjs
   - sharp
   - ssh2

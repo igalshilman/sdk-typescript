@@ -1,0 +1,10 @@
+# Per-suite skip list for sdk-test-suite. Empty everywhere is the release gate
+# (TODO S5-10); add an entry with a comment naming the reason while porting.
+exclusions:
+  "alwaysSuspending": []
+  "default": []
+  "lazyState": []
+  "persistedTimers": []
+  "singleThreadSinglePartition": []
+  "threeNodes": []
+  "threeNodesAlwaysSuspending": []

@@ -103,6 +103,11 @@ export default [
       "./packages/libs/restate-sdk-gen/e2e/**/*.ts",
       "./packages/libs/restate-sdk-gen/test-services/**/*.ts",
       "./packages/libs/restate-sdk-gen/bench/**/*.ts",
+      // restate-sdk-effect does the same.
+      "./packages/libs/restate-sdk-effect/examples/**/*.ts",
+      "./packages/libs/restate-sdk-effect/e2e/**/*.ts",
+      "./packages/libs/restate-sdk-effect/test-services/**/*.ts",
+      "./packages/libs/restate-sdk-effect/bench/**/*.ts",
     ],
     rules: {
       "no-console": "off",

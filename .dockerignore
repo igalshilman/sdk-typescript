@@ -4,6 +4,7 @@ dist
 .restate
 tmp
 sdk-tests.jar
+sdk-tests.jar.version
 sdk-shared-core-wasm-bindings/pkg
 sdk-shared-core-wasm-bindings/target
 .git
