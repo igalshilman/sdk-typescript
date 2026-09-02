@@ -39,7 +39,7 @@ export const proxy = restate.service({
   handlers: {
     call: restate.handler({}, (req: ProxyRequest) =>
       Effect.map(
-        restate.call<Uint8Array, Uint8Array>({
+        restate.rpc.call<Uint8Array, Uint8Array>({
           service: req.serviceName,
           method: req.handlerName,
           key: req.virtualObjectKey,
@@ -56,7 +56,7 @@ export const proxy = restate.service({
 
     oneWayCall: restate.handler({}, (req: ProxyRequest) =>
       Effect.gen(function* () {
-        const handle = yield* restate.send<Uint8Array>({
+        const handle = yield* restate.rpc.send<Uint8Array>({
           service: req.serviceName,
           method: req.handlerName,
           key: req.virtualObjectKey,
@@ -97,16 +97,19 @@ export const proxy = restate.service({
           };
           if (req.oneWayCall) {
             return Effect.flatMap(
-              restate.send<Uint8Array>({ ...target, delay: pr.delayMillis }),
+              restate.rpc.send<Uint8Array>({
+                ...target,
+                delay: pr.delayMillis,
+              }),
               // The reference service reads the id here too.
               (handle) => handle.invocationId
             );
           }
           const call = { ...target, outputSerde: restate.serde.binary };
           return req.awaitAtTheEnd
-            ? restate.call<Uint8Array, Uint8Array>(call)
+            ? restate.rpc.call<Uint8Array, Uint8Array>(call)
             : // The entry is created; nobody reads the result.
-              restate.callDetached<Uint8Array, Uint8Array>(call);
+              restate.rpc.detached<Uint8Array, Uint8Array>(call);
         }),
         { concurrency: "unbounded", discard: true }
       )

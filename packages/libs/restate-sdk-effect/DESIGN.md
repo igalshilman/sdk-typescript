@@ -401,7 +401,7 @@ via Clock/Random/Logger or plain Effect combinators):
 run(name, effect, opts?)      // journaled step; effect runs on the app runtime,
                               // R scrubbed of Restate capabilities (compile error
                               // for nested journal ops — overeng's trick)
-runExit(name, effect, opts?)  // observe outcome as Exit (sagas/compensation)
+Effect.exit(run(...))        // observe outcome as Exit (sagas/compensation)
 awakeable(schema?)            // { id, await: Effect<T> }
 resolveAwakeable / rejectAwakeable
 state / sharedState           // Schema-typed K/V (objects, workflows)
@@ -486,7 +486,7 @@ Adopted from overeng decision 0003, unchanged in substance:
   defect (classification drift never silently mis-encodes).
 - **Interruption → `CancelledError`** (not retried).
 - `Restate.run`'s inner effect is `Effect<A, never, R>` (clean E; die
-  inside the step to force an infra retry; observe with `runExit` for
+  inside the step to force an infra retry; observe with `Effect.exit` for
   sagas). Typed-failure transport through `run` (journaling an encoded
   `Exit`) is deferred, as overeng also concluded.
 - Awakeable/durable-promise rejections terminalize **verbatim**.

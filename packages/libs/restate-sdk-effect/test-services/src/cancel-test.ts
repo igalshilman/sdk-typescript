@@ -24,7 +24,7 @@ export const cancelTestRunner = restate.object({
     startTest: restate.handler({}, (op: string) =>
       Effect.gen(function* () {
         const key = yield* restate.key;
-        yield* restate
+        yield* restate.rpc
           .call<string, void>({
             service: "CancelTestBlockingService",
             method: "block",
@@ -59,7 +59,7 @@ export const cancelTestBlockingService = restate.object({
 
         switch (op) {
           case "CALL":
-            yield* restate.call<string, void>({
+            yield* restate.rpc.call<string, void>({
               service: "CancelTestBlockingService",
               method: "block",
               key,

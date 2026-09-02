@@ -67,7 +67,7 @@ export const serviceInterpreterHelper = restate.service({
       {},
       (param: { layer: Layer; key: string }) =>
         Effect.asVoid(
-          restate.send<Program>({
+          restate.rpc.send<Program>({
             service: `ObjectInterpreterL${param.layer}`,
             method: "interpret",
             key: param.key,
@@ -94,7 +94,7 @@ export const serviceInterpreterHelper = restate.service({
           const callback = yield* restate.awakeable<string>();
           yield* restate.resolveAwakeable(input.txPromiseId, callback.id);
           yield* callback.result;
-          yield* restate.send<Program>({
+          yield* restate.rpc.send<Program>({
             service: `ObjectInterpreterL${input.interpreter.layer}`,
             method: "interpret",
             key: input.interpreter.key,
@@ -176,7 +176,7 @@ function makeInterpretHandler(layer: Layer) {
             return Effect.gen(function* () {
               const expected = `hello-${i}`;
               const fiber = yield* Effect.forkChild(
-                restate.call<string, string>({
+                restate.rpc.call<string, string>({
                   service: "ServiceInterpreterHelper",
                   method: "echo",
                   parameter: expected,
@@ -188,7 +188,7 @@ function makeInterpretHandler(layer: Layer) {
             return Effect.gen(function* () {
               const expected = `hello-${i}`;
               const fiber = yield* Effect.forkChild(
-                restate.call<{ parameter: string; sleep: number }, string>({
+                restate.rpc.call<{ parameter: string; sleep: number }, string>({
                   service: "ServiceInterpreterHelper",
                   method: "echoLater",
                   parameter: { parameter: expected, sleep: cmd.sleep ?? 0 },
@@ -198,7 +198,7 @@ function makeInterpretHandler(layer: Layer) {
             });
           case INCREMENT_VIA_DELAYED_CALL:
             return Effect.asVoid(
-              restate.send<{ layer: Layer; key: string }>({
+              restate.rpc.send<{ layer: Layer; key: string }>({
                 service: "ServiceInterpreterHelper",
                 method: "incrementIndirectly",
                 parameter: { layer, key },
@@ -223,7 +223,7 @@ function makeInterpretHandler(layer: Layer) {
           case RECOVER_TERMINAL_CALL:
             return Effect.gen(function* () {
               const exit = yield* Effect.exit(
-                restate.call<null, void>({
+                restate.rpc.call<null, void>({
                   service: "ServiceInterpreterHelper",
                   method: "terminalFailure",
                   parameter: null,
@@ -248,7 +248,7 @@ function makeInterpretHandler(layer: Layer) {
             );
           case INCREMENT_STATE_COUNTER_INDIRECTLY:
             return Effect.asVoid(
-              restate.send<{ layer: Layer; key: string }>({
+              restate.rpc.send<{ layer: Layer; key: string }>({
                 service: "ServiceInterpreterHelper",
                 method: "incrementIndirectly",
                 parameter: { layer, key },
@@ -259,7 +259,7 @@ function makeInterpretHandler(layer: Layer) {
               const callback = yield* restate.awakeable<string>();
               const fiber = yield* Effect.forkChild(callback.result);
               pending.set(i, { expected: "ok", fiber });
-              yield* restate.send<string>({
+              yield* restate.rpc.send<string>({
                 service: "ServiceInterpreterHelper",
                 method: "resolveAwakeable",
                 parameter: callback.id,
@@ -270,7 +270,7 @@ function makeInterpretHandler(layer: Layer) {
               const callback = yield* restate.awakeable<string>();
               const fiber = yield* Effect.forkChild(callback.result);
               pending.set(i, { expected: "rejected", fiber });
-              yield* restate.send<string>({
+              yield* restate.rpc.send<string>({
                 service: "ServiceInterpreterHelper",
                 method: "rejectAwakeable",
                 parameter: callback.id,
@@ -279,7 +279,7 @@ function makeInterpretHandler(layer: Layer) {
           case INCREMENT_STATE_COUNTER_VIA_AWAKEABLE:
             return Effect.gen(function* () {
               const exchange = yield* restate.awakeable<string>();
-              yield* restate.send<{
+              yield* restate.rpc.send<{
                 interpreter: { layer: Layer; key: string };
                 txPromiseId: string;
               }>({
@@ -296,7 +296,7 @@ function makeInterpretHandler(layer: Layer) {
           case CALL_NEXT_LAYER_OBJECT:
             return Effect.gen(function* () {
               const fiber = yield* Effect.forkChild(
-                restate.call<Program, void>({
+                restate.rpc.call<Program, void>({
                   service: `ObjectInterpreterL${layer + 1}`,
                   method: "interpret",
                   key: String(cmd.key ?? ""),

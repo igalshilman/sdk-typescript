@@ -60,7 +60,7 @@ describe("application runtime", () => {
     const { counts, layer } = countingLayer();
     const services = [definition("a"), definition("b"), definition("c")];
 
-    restate.bind({ services, layer });
+    restate.endpoint.bind({ services, layer });
     const contexts = await Promise.all(
       services.map((s) => slotOf(s).context())
     );
@@ -78,9 +78,9 @@ describe("application runtime", () => {
     const { counts, layer } = countingLayer();
     const services = [definition("d"), definition("e")];
 
-    restate.bind({ services, layer });
+    restate.endpoint.bind({ services, layer });
     await slotOf(services[0]!).context();
-    await restate.dispose(services);
+    await restate.endpoint.dispose(services);
 
     expect(counts.built).toBe(1);
     expect(counts.released).toBe(1);
@@ -91,8 +91,8 @@ describe("application runtime", () => {
     const first = [definition("f")];
     const second = [definition("g")];
 
-    restate.bind({ services: first, layer });
-    restate.bind({ services: second, layer });
+    restate.endpoint.bind({ services: first, layer });
+    restate.endpoint.bind({ services: second, layer });
     await Promise.all([...first, ...second].map((s) => slotOf(s).context()));
 
     // Two endpoints are two applications; sharing across them would tie their
@@ -103,7 +103,7 @@ describe("application runtime", () => {
   it("works with no layer at all", async () => {
     // What lets an Effect service be registered with the plain SDK endpoint.
     const services = [definition("h")];
-    restate.bind({ services });
+    restate.endpoint.bind({ services });
     await expect(slotOf(services[0]!).context()).resolves.toBeDefined();
   });
 });

@@ -103,21 +103,21 @@ anything like that from a journaled read or a durable timer.
 The runtime guarantees that fibers wake in journaled order, which makes
 *concurrency* deterministic. It cannot make your own nondeterminism
 deterministic: `if (Math.random() > 0.5)`, iterating a `Set` built from an
-unordered source, or branching on `restate.isProcessing` will diverge. Rule 2
+unordered source, or branching on `restate.diagnostics.isProcessing` will diverge. Rule 2
 in the README covers the common cases.
 
 ## A call you hold to await later has not started
 
 Restate delivers to a target in the order the journal entries were *created*, so
 entry order is semantics: two calls to the same virtual object arrive in that
-order. Effects are lazy, so `restate.call(...)` on its own creates nothing — the
+order. Effects are lazy, so `restate.rpc.call(...)` on its own creates nothing — the
 entry appears when the effect runs. Translating the promise-SDK idiom literally
 therefore reorders the journal:
 
 ```ts
 // WRONG: `first` has not started, so the send's entry is created first
-const first = restate.call({ service: "Target", method: "append", ... });
-yield* restate.send({ service: "Target", method: "append", ... });
+const first = restate.rpc.call({ service: "Target", method: "append", ... });
+yield* restate.rpc.send({ service: "Target", method: "append", ... });
 yield* first;
 ```
 
@@ -131,9 +131,9 @@ list, and it mixes calls and sends freely:
 ```ts
 yield* Effect.all(
   [
-    restate.call({ ... }), // entry 1
-    restate.send({ ... }), // entry 2
-    restate.call({ ... }), // entry 3
+    restate.rpc.call({ ... }), // entry 1
+    restate.rpc.send({ ... }), // entry 2
+    restate.rpc.call({ ... }), // entry 3
   ],
   { concurrency: "unbounded", discard: true }
 );

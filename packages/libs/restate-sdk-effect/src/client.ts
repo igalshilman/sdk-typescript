@@ -34,24 +34,6 @@ import { adapt } from "./internal/default-lib.js";
 import { contextRead, journal, syncJournal } from "./internal/journal.js";
 import { type AnySchema, type SchemaType, toSerde } from "./serde.js";
 
-/** Options for a request-response call. */
-export type CallOptions = {
-  /** Idempotency key for the callee's invocation. */
-  readonly idempotencyKey?: string;
-  /** Concurrency-limit key; only valid inside a scope. */
-  readonly limitKey?: string;
-  /** Extra headers to attach to the request. */
-  readonly headers?: Record<string, string>;
-  /** Journal entry name, for observability. */
-  readonly name?: string;
-};
-
-/** Options for a one-way send. */
-export type SendOptions = CallOptions & {
-  /** Delay before the callee is invoked. */
-  readonly delay?: restate.Duration | number;
-};
-
 /** Handle on a one-way send. */
 export interface InvocationHandle {
   /** The callee's invocation id — itself a durable operation. */
@@ -62,32 +44,46 @@ export interface InvocationHandle {
   >;
 }
 
-/** A request-response client over a service contract. */
+/**
+ * A request-response client over a service contract.
+ *
+ * Options are the SDK's branded `rpc.opts(...)` wrapper, not a plain object:
+ * that is what lets a void-input call take options in first position without
+ * the runtime having to guess whether an argument is a request body. It is also
+ * the same call shape as the promise and gen SDKs.
+ *
+ * ```ts
+ * yield* client(Greeter).greet("Sam", rpc.opts({ idempotencyKey: "x" }));
+ * yield* client(Pinger).ping(rpc.opts({ idempotencyKey: "x" }));
+ * ```
+ */
 export type Client<H extends Record<string, HandlerDescriptor>> = {
   readonly [K in keyof H]: H[K] extends HandlerDescriptor<infer I, infer O>
     ? [I] extends [void]
       ? (
-          input?: undefined,
-          options?: CallOptions
+          opts?: restate.Opts<I, O>
         ) => Effect.Effect<O, RestateFailure, RestateContext>
       : (
           input: I,
-          options?: CallOptions
+          opts?: restate.Opts<I, O>
         ) => Effect.Effect<O, RestateFailure, RestateContext>
     : never;
 };
 
-/** A fire-and-forget client over a service contract. */
+/**
+ * A fire-and-forget client over a service contract. Options are
+ * `rpc.sendOpts(...)` — separately branded from `rpc.opts`, so a send's `delay`
+ * cannot be passed to a request-response call.
+ */
 export type SendClient<H extends Record<string, HandlerDescriptor>> = {
   readonly [K in keyof H]: H[K] extends HandlerDescriptor<infer I, any>
     ? [I] extends [void]
       ? (
-          input?: undefined,
-          options?: SendOptions
+          opts?: restate.SendOpts<I>
         ) => Effect.Effect<InvocationHandle, never, RestateContext>
       : (
           input: I,
-          options?: SendOptions
+          opts?: restate.SendOpts<I>
         ) => Effect.Effect<InvocationHandle, never, RestateContext>
     : never;
 };
@@ -123,7 +119,8 @@ function makeClient(
   return new Proxy({} as any, {
     get(_target, method: string) {
       return (...args: unknown[]) => {
-        const { input, options } = splitArgs<CallOptions>(args);
+        const { input, options } =
+          splitArgs<restate.ClientCallOptions<unknown, unknown>>(args);
         const handler = descriptor._handlers[method] as
           | HandlerDescriptor
           | undefined;
@@ -179,7 +176,8 @@ function makeSendClient(
   return new Proxy({} as any, {
     get(_target, method: string) {
       return (...args: unknown[]) => {
-        const { input, options } = splitArgs<SendOptions>(args);
+        const { input, options } =
+          splitArgs<restate.ClientSendOptions<unknown>>(args);
         const handler = descriptor._handlers[method] as
           | HandlerDescriptor
           | undefined;
@@ -467,24 +465,42 @@ export function invocation(invocationId: string): InvocationRef {
 }
 
 /**
- * Split a client call's arguments into input and options, **positionally**.
+ * Split a client call's arguments into input and options.
  *
- * Position 0 is always the input, never options — including for a void-input
- * handler, whose client signature is `(input?: undefined, options?)` precisely
- * so that `ping(opts)` is a compile error rather than a request whose body is
- * the options object. Never discriminate on object shape here: a legitimate
- * request body can look exactly like `CallOptions`.
+ * Discrimination is by **brand**, never by shape: `rpc.opts`/`rpc.sendOpts`
+ * return instances of the SDK's `Opts`/`SendOpts` classes, so a lone argument
+ * is unambiguous even when a legitimate request body happens to have an
+ * `idempotencyKey` field.
  */
 function splitArgs<O>(args: unknown[]): {
   input: unknown;
   options: O | undefined;
 } {
-  switch (args.length) {
-    case 0:
-      return { input: undefined, options: undefined };
-    case 1:
-      return { input: args[0], options: undefined };
-    default:
-      return { input: args[0], options: args[1] as O };
+  if (args.length === 0) return { input: undefined, options: undefined };
+  if (args.length === 1) {
+    const only = args[0];
+    return isOpts(only)
+      ? { input: undefined, options: unwrapOpts<O>(only) }
+      : { input: only, options: undefined };
   }
+  const second = args[1];
+  return {
+    input: args[0],
+    options: isOpts(second) ? unwrapOpts<O>(second) : (second as O),
+  };
+}
+
+/** True for the SDK's branded option wrappers. */
+function isOpts(value: unknown): boolean {
+  return value instanceof restate.Opts || value instanceof restate.SendOpts;
+}
+
+/**
+ * Read the options out of a branded wrapper.
+ *
+ * `Opts`/`SendOpts` keep them in a private field behind a private constructor —
+ * the brand is the point — so getting at them needs one cast. Here it is, once.
+ */
+function unwrapOpts<O>(wrapper: unknown): O {
+  return (wrapper as { readonly opts: O }).opts;
 }

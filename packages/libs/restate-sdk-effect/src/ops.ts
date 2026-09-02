@@ -233,8 +233,31 @@ function stateClearAll(): Effect.Effect<
   });
 }
 
-/** The shape of {@link state}. */
+/**
+ * A state key with its codec bound once.
+ *
+ * ```ts
+ * const count = state("count", Schema.Number);
+ * yield* count.set((yield* count.get) ?? 0) + 1);
+ * ```
+ */
+export interface StateCell<T> {
+  /** The value, or `null` when the key is not set. */
+  readonly get: Effect.Effect<
+    T | null,
+    RestateFailure,
+    RestateContext | StateRead
+  >;
+  /** Write the value. */
+  set(value: T): Effect.Effect<void, never, RestateContext | StateWrite>;
+  /** Delete the key. */
+  readonly clear: Effect.Effect<void, never, RestateContext | StateWrite>;
+}
+
+/** The shape of {@link state}: callable for a cell, plus the ad-hoc operations. */
 export interface StateOps {
+  /** Bind a key to a codec once, and read/write it through the result. */
+  <S extends AnySchema>(name: string, codec: S): StateCell<SchemaType<S>>;
   /** Read a state value, or `null` when it is not set. */
   get<S extends AnySchema>(
     name: string,
@@ -267,13 +290,24 @@ export interface StateOps {
   clearAll(): Effect.Effect<void, never, RestateContext | StateWrite>;
 }
 
-export const state: StateOps = {
+function stateCell<S extends AnySchema>(
+  name: string,
+  codec: S
+): StateCell<SchemaType<S>> {
+  return {
+    get: stateGet(name, codec),
+    set: (value: SchemaType<S>) => stateSet(name, codec, value),
+    clear: stateClear(name),
+  };
+}
+
+export const state: StateOps = Object.assign(stateCell, {
   get: stateGet,
   keys: stateKeys,
   set: stateSet,
   clear: stateClear,
   clearAll: stateClearAll,
-};
+}) as StateOps;
 
 // ---------------------------------------------------------------------------
 // awakeables

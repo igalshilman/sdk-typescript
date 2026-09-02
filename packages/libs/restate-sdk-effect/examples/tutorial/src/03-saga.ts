@@ -9,7 +9,7 @@
  * https://github.com/restatedev/sdk-typescript/blob/main/LICENSE
  */
 
-// Tier 3: sagas. Two shapes — explicit `runExit` + compensation, and
+// Tier 3: sagas. Two shapes — explicit `Effect.exit` + compensation, and
 // `acquireRelease`, whose finalizers also run when the invocation is cancelled.
 //
 //   curl localhost:8080/saga/process     --json '{"orderId":"o-1","fail":false}'
@@ -36,12 +36,16 @@ export const saga = restate.service({
           reserveStock(order.orderId)
         );
 
-        const charged = yield* restate.runExit(
-          "charge",
-          order.fail
-            ? Effect.die(new Error("card declined"))
-            : chargeCard(order.orderId),
-          { retry: { maxAttempts: 1 } }
+        // `Effect.exit` turns the step's outcome into a value, so a failure
+        // becomes something to branch on rather than something to propagate.
+        const charged = yield* Effect.exit(
+          restate.run(
+            "charge",
+            order.fail
+              ? Effect.die(new Error("card declined"))
+              : chargeCard(order.orderId),
+            { retry: { maxAttempts: 1 } }
+          )
         );
 
         if (Exit.isFailure(charged)) {

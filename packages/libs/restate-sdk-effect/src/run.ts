@@ -20,7 +20,7 @@
 //
 // The closure's effect must not fail in a typed way (`Effect<A, never, R>`):
 // only a *value* can be journaled. Die inside the step to force an
-// infrastructure retry; use `runExit` when you need to observe the step's
+// infrastructure retry; wrap in `Effect.exit` when you need to observe the step's
 // terminal outcome instead of failing on it.
 
 import { Cause, Context, Effect, Exit, type Schema } from "effect";
@@ -126,29 +126,6 @@ export function run<A, R>(
       onInterrupt: () => controller.abort(new restate.CancelledError()),
     };
   }) as Effect.Effect<A, RestateFailure, RestateContext | RunRequirements<R>>;
-}
-
-/**
- * Like {@link run}, but the step's outcome is delivered as an `Exit` instead of
- * failing the surrounding effect — the shape sagas want:
- *
- * ```ts
- * const charge = yield* restate.runExit("charge", chargeOrder(order));
- * if (Exit.isFailure(charge)) {
- *   yield* restate.run("refund", refund(order));
- * }
- * ```
- */
-export function runExit<A, R>(
-  name: string,
-  effect: Effect.Effect<A, never, R>,
-  options?: RunOptions<A>
-): Effect.Effect<
-  Exit.Exit<A, RestateFailure>,
-  never,
-  RestateContext | RunRequirements<R>
-> {
-  return Effect.exit(run(name, effect, options));
 }
 
 function toSdkRunOptions<A>(

@@ -65,30 +65,20 @@ export {
   workflow,
 } from "./define.js";
 export type {
-  AppRuntimeBinding,
-  EffectDefinitionExtras,
-  EffectHandlerImpl,
-  Capabilities,
-  HandlerKindFor,
-  Handlers,
-  HandlersRequire,
-  Requires,
   EffectObjectDefinition,
   EffectServiceDefinition,
   EffectWorkflowDefinition,
   Handler,
-  HandlerDescriptors,
   HandlerOptions,
   ImplementationOf,
 } from "./define.js";
 
-export { bind, createEndpointHandler, dispose, serve } from "./endpoint.js";
-export type { EffectDefinition, EndpointConfig } from "./endpoint.js";
+export { serve } from "./endpoint.js";
 
 // ---------------------------------------------------------------------------
 // durable operations
 // ---------------------------------------------------------------------------
-export { run, runExit } from "./run.js";
+export { run } from "./run.js";
 export type {
   RestateOperationsAreNotAllowedInsideRun,
   RetryOptions,
@@ -97,15 +87,11 @@ export type {
 } from "./run.js";
 
 export {
-  abortSignal,
   attach,
   awakeable,
   cancel,
-  durable,
   handlerRequest,
-  isProcessing,
   key,
-  rawContext,
   rejectAwakeable,
   resolveAwakeable,
   signal,
@@ -118,31 +104,40 @@ export type {
   Awakeable,
   Codec,
   HandlerRequest,
+  StateCell,
   StateOps,
   WorkflowPromise,
 } from "./ops.js";
 
 export {
-  call,
-  callDetached,
   client,
   decodeFailure,
   invocation,
   scope,
-  send,
   sendClient,
 } from "./client.js";
 export type {
-  CallOptions,
-  CallRequest,
   Client,
   InvocationHandle,
   InvocationRef,
   SendClient,
-  SendOptions,
-  SendRequest,
   SignalHandle,
 } from "./client.js";
+
+// ---------------------------------------------------------------------------
+// grouped surfaces
+// ---------------------------------------------------------------------------
+
+/** Calls addressed by name, and the branded call options. */
+export * as rpc from "./ns/rpc.js";
+/** Serving these definitions somewhere other than {@link serve}. */
+export * as endpoint from "./ns/endpoint.js";
+/** Escape hatches outside what this runtime can check. */
+export * as unsafe from "./ns/unsafe.js";
+/** Observing the invocation, never driving it. */
+export * as diagnostics from "./ns/diagnostics.js";
+/** Machinery that public signatures name. Not stable; not for hand use. */
+export * as internals from "./ns/internals.js";
 
 // ---------------------------------------------------------------------------
 // context, capabilities, errors, serde
@@ -155,13 +150,7 @@ export {
   StateRead,
   StateWrite,
 } from "./context.js";
-export type {
-  InvocationDriver,
-  RestateCapability,
-  RestateInvocation,
-} from "./context.js";
-
-export type { Awaitable } from "./internal/lib.js";
+export type { RestateCapability, RestateInvocation } from "./context.js";
 
 export {
   isCancellation,
@@ -185,28 +174,13 @@ export {
 export { schemaSerde } from "./serde.js";
 export type { AnySchema, SchemaType } from "./serde.js";
 
-export type { HandlerKind } from "./internal/runtime.js";
-
 // ---------------------------------------------------------------------------
-// contracts — re-exported so a service package needs one import
+// contracts — one import for a service package
 // ---------------------------------------------------------------------------
-export { iface, serde } from "@restatedev/restate-sdk-core";
+export { iface } from "./iface.js";
 export type {
-  Descriptor,
-  HandlerDescriptor,
-  ImplementedDefinition,
-  ImplementedObjectDefinition,
-  ImplementedServiceDefinition,
-  ImplementedWorkflowDefinition,
-  ObjectDescriptor,
-  Serde,
-  ServiceDefinition,
-  ServiceDescriptor,
-  SerdeType,
-  ServiceInterface,
-  StandardSchemaV1,
-  StandardTypedV1,
-  VirtualObjectDefinition,
-  WorkflowDefinition,
-  WorkflowDescriptor,
-} from "@restatedev/restate-sdk-core";
+  EffectServiceInterface,
+  SchemaDeclarators,
+  SharedSchemaDeclarators,
+} from "./iface.js";
+export { serde } from "@restatedev/restate-sdk-core";

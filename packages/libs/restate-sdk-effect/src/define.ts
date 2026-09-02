@@ -46,6 +46,7 @@ import type {
 } from "./context.js";
 import { AppRuntimeSlot } from "./internal/app-runtime.js";
 import { type HandlerKind, invoke } from "./internal/runtime.js";
+import type { RestateFailure } from "./errors.js";
 import { type AnySchema, type SchemaType, toSerde } from "./serde.js";
 
 // ---------------------------------------------------------------------------
@@ -74,6 +75,24 @@ export type HandlerOptions<I, O, E> = {
   /** Metadata surfaced in discovery. */
   readonly metadata?: Record<string, string>;
 };
+
+/**
+ * The error channel a handler's effect may use.
+ *
+ * `RestateFailure` is always allowed: every durable operation can produce one,
+ * and the boundary propagates it terminally on its own. An `error:` codec adds
+ * the handler's *domain* failures on top, which is what the codec encodes into
+ * the terminal error's body.
+ *
+ * So a *domain* failure with no codec is a compile error rather than a silent
+ * defect-and-retry. Declare it with `error:`, handle it in the handler, or say
+ * `Effect.orDie` if it really is a defect.
+ */
+export type DeclaredError<Options, E> = Options extends {
+  readonly error: unknown;
+}
+  ? E | RestateFailure
+  : RestateFailure;
 
 /** A handler bound to its codecs. Produced by {@link handler}. */
 export type Handler<
@@ -150,21 +169,24 @@ export type HandlerKindFor<
  * )
  * ```
  */
-export function handler<SI extends AnySchema, SO extends AnySchema, E, R>(
-  options: HandlerOptions<SchemaType<SI>, SchemaType<SO>, E> & {
-    input: SI;
-    output: SO;
-  },
-  fn: (input: SchemaType<SI>) => Effect.Effect<SchemaType<SO>, E, R>
+export function handler<SI extends AnySchema, SO extends AnySchema, E, R, OPT>(
+  options: OPT &
+    HandlerOptions<SchemaType<SI>, SchemaType<SO>, E> & {
+      input: SI;
+      output: SO;
+    },
+  fn: (
+    input: SchemaType<SI>
+  ) => Effect.Effect<SchemaType<SO>, DeclaredError<OPT, E>, R>
 ): Handler<SchemaType<SI>, SchemaType<SO>, R, false>;
 /** A handler that takes no input. */
-export function handler<O, E, R>(
-  options: HandlerOptions<void, O, E>,
-  fn: () => Effect.Effect<O, E, R>
+export function handler<O, E, R, OPT>(
+  options: OPT & HandlerOptions<void, O, E>,
+  fn: () => Effect.Effect<O, DeclaredError<OPT, E>, R>
 ): Handler<void, O, R, false>;
-export function handler<I, O, E, R>(
-  options: HandlerOptions<I, O, E>,
-  fn: (input: I) => Effect.Effect<O, E, R>
+export function handler<I, O, E, R, OPT>(
+  options: OPT & HandlerOptions<I, O, E>,
+  fn: (input: I) => Effect.Effect<O, DeclaredError<OPT, E>, R>
 ): Handler<I, O, R, false>;
 export function handler(
   options: HandlerOptions<any, any, any>,
@@ -178,21 +200,30 @@ export function handler(
  * non-`run` workflow handler. Shared handlers run concurrently with the
  * exclusive one, so they may read state but not write it.
  */
-export function sharedHandler<SI extends AnySchema, SO extends AnySchema, E, R>(
-  options: HandlerOptions<SchemaType<SI>, SchemaType<SO>, E> & {
-    input: SI;
-    output: SO;
-  },
-  fn: (input: SchemaType<SI>) => Effect.Effect<SchemaType<SO>, E, R>
+export function sharedHandler<
+  SI extends AnySchema,
+  SO extends AnySchema,
+  E,
+  R,
+  OPT,
+>(
+  options: OPT &
+    HandlerOptions<SchemaType<SI>, SchemaType<SO>, E> & {
+      input: SI;
+      output: SO;
+    },
+  fn: (
+    input: SchemaType<SI>
+  ) => Effect.Effect<SchemaType<SO>, DeclaredError<OPT, E>, R>
 ): Handler<SchemaType<SI>, SchemaType<SO>, R, true>;
 /** A shared handler that takes no input. */
-export function sharedHandler<O, E, R>(
-  options: HandlerOptions<void, O, E>,
-  fn: () => Effect.Effect<O, E, R>
+export function sharedHandler<O, E, R, OPT>(
+  options: OPT & HandlerOptions<void, O, E>,
+  fn: () => Effect.Effect<O, DeclaredError<OPT, E>, R>
 ): Handler<void, O, R, true>;
-export function sharedHandler<I, O, E, R>(
-  options: HandlerOptions<I, O, E>,
-  fn: (input: I) => Effect.Effect<O, E, R>
+export function sharedHandler<I, O, E, R, OPT>(
+  options: OPT & HandlerOptions<I, O, E>,
+  fn: (input: I) => Effect.Effect<O, DeclaredError<OPT, E>, R>
 ): Handler<I, O, R, true>;
 export function sharedHandler(
   options: HandlerOptions<any, any, any>,
@@ -232,6 +263,15 @@ function makeHandler(
  * classification drift — is a defect instead, so a mis-declared error never
  * silently encodes as something else.
  */
+/** Structural check, so a failure crossing module copies is still recognized. */
+function isRestateFailure(value: unknown): value is RestateFailure {
+  return (
+    value instanceof Error &&
+    (value as { _tag?: unknown })._tag === "RestateFailure" &&
+    (value as { terminal?: unknown }).terminal instanceof restate.TerminalError
+  );
+}
+
 function makeFailureEncoder(
   options: HandlerOptions<any, any, any>
 ): (failure: any) => restate.TerminalError {
@@ -239,6 +279,10 @@ function makeFailureEncoder(
   const codec = options.error;
   if (codec === undefined) {
     return (failure: unknown) => {
+      // The SDK's own failure needs no codec: it already *is* a terminal
+      // outcome, so it propagates with its original code and metadata rather
+      // than being retried.
+      if (isRestateFailure(failure)) return failure.terminal;
       throw failure instanceof Error
         ? failure
         : new Error(
@@ -250,6 +294,9 @@ function makeFailureEncoder(
   }
   const serde = toSerde(codec);
   return (failure: unknown) => {
+    // A declared codec covers the handler's domain failures; a RestateFailure
+    // that reached the boundary is not one of them.
+    if (isRestateFailure(failure)) return failure.terminal;
     let body: string;
     try {
       body = new TextDecoder().decode(serde!.serialize(failure as never));
@@ -268,6 +315,28 @@ function makeFailureEncoder(
 
 /** A map of handlers, as passed to `service` / `object` / `workflow`. */
 export type Handlers = Record<string, Handler<any, any, any, any>>;
+
+/**
+ * The handler map an `implement` call yields: the contract's input/output for
+ * every slot, with each implementation's own `R`.
+ */
+export type ImplementedHandlers<
+  D extends Descriptor<string, Record<string, HandlerDescriptor>, any>,
+  H,
+> = {
+  [N in keyof D["_handlers"]]: D["_handlers"][N] extends HandlerDescriptor<
+    infer I,
+    infer O,
+    infer Shared
+  >
+    ? Handler<
+        I,
+        O,
+        N extends keyof H ? ImplementationRequires<H[N]> : never,
+        Shared extends true ? true : false
+      >
+    : never;
+};
 
 /** Descriptor map derived from a handler map. */
 export type HandlerDescriptors<H extends Handlers> = {
@@ -326,11 +395,61 @@ export type ImplementationOf<
   readonly [N in keyof D["_handlers"]]: D["_handlers"][N] extends HandlerDescriptor<
     infer I,
     infer O,
-    infer Shared
+    any
   >
-    ? Handler<I, O, any, Shared extends true ? true : false>
+    ? BareImplementation<I, O> | Handler<I, O, any, boolean>
     : never;
 };
+
+/**
+ * A contract slot implemented as a plain function.
+ *
+ * The descriptor already owns the codecs and the shared marker, so there is
+ * nothing for a `handler(...)` wrapper to add unless the implementation wants
+ * handler-local discovery options or a declared domain-error codec.
+ */
+export type BareImplementation<I, O> = (input: I) => Effect.Effect<O, any, any>;
+
+/** The `R` of one implementation entry, in either form. */
+export type ImplementationRequires<T> =
+  T extends Handler<any, any, infer R, any>
+    ? R
+    : T extends (input: any) => Effect.Effect<any, any, infer R>
+      ? R
+      : never;
+
+/**
+ * What an `implement` call still needs from the application layer.
+ *
+ * Sharedness comes from the *contract*, not from the implementation: the
+ * descriptor already declares it, so a shared slot yields shared-handler
+ * capabilities however it was implemented.
+ */
+export type ImplementationRequire<
+  D extends Descriptor<string, Record<string, HandlerDescriptor>, any>,
+  H,
+> = {
+  [N in keyof D["_handlers"]]: D["_handlers"][N] extends HandlerDescriptor<
+    any,
+    any,
+    infer Shared
+  >
+    ? N extends keyof H
+      ? Requires<
+          ImplementationRequires<H[N]>,
+          HandlerKindFor<
+            D["_kind"] extends "service"
+              ? "service"
+              : D["_kind"] extends "object"
+                ? "object"
+                : "workflow",
+            Shared extends true ? true : false,
+            N
+          >
+        >
+      : never
+    : never;
+}[keyof D["_handlers"]];
 
 /**
  * The endpoint's hook for binding the application layer to a definition. Part
@@ -370,7 +489,10 @@ export type AnyEffectDefinition<R> = EffectDefinitionExtras<R> & {
  * });
  * ```
  */
-export function service<P extends string, H extends Handlers>(config: {
+export function service<
+  P extends string,
+  H extends Handlers & ServiceHandlerShape<H>,
+>(config: {
   readonly name: P;
   readonly description?: string;
   readonly metadata?: Record<string, string>;
@@ -465,7 +587,10 @@ export function object<P extends string, H extends Handlers>(config: {
  * Define a workflow: a keyed `run` handler that executes once per key, plus
  * shared handlers that can interact with a running instance.
  */
-export function workflow<P extends string, H extends Handlers>(config: {
+export function workflow<
+  P extends string,
+  H extends Handlers & WorkflowHandlerShape<H>,
+>(config: {
   readonly name: P;
   readonly description?: string;
   readonly metadata?: Record<string, string>;
@@ -522,25 +647,45 @@ export function implement<
   descriptor: D,
   handlers: H
 ): D["_kind"] extends "service"
-  ? EffectServiceDefinition<D["name"], H, HandlersRequire<H, "service">>
+  ? EffectServiceDefinition<
+      D["name"],
+      ImplementedHandlers<D, H>,
+      ImplementationRequire<D, H>
+    >
   : D["_kind"] extends "object"
-    ? EffectObjectDefinition<D["name"], H, HandlersRequire<H, "object">>
-    : EffectWorkflowDefinition<D["name"], H, HandlersRequire<H, "workflow">> {
-  // Inherit the contract's codecs for any handler that did not declare its own.
+    ? EffectObjectDefinition<
+        D["name"],
+        ImplementedHandlers<D, H>,
+        ImplementationRequire<D, H>
+      >
+    : EffectWorkflowDefinition<
+        D["name"],
+        ImplementedHandlers<D, H>,
+        ImplementationRequire<D, H>
+      > {
   const merged: Handlers = {};
-  const entries = Object.entries(handlers) as Array<
-    [string, Handler<any, any, any, boolean>]
-  >;
+  const entries = Object.entries(handlers) as Array<[string, unknown]>;
   for (const [name, entry] of entries) {
     const contract = descriptor._handlers[name];
+    // A bare function inherits everything from the contract; there is nothing
+    // else for it to carry.
+    const declared: Handler<any, any, any, boolean> =
+      typeof entry === "function"
+        ? makeHandler(
+            {},
+            entry as (input: any) => Effect.Effect<any, any, any>,
+            contract?._shared === true
+          )
+        : (entry as Handler<any, any, any, boolean>);
+    // Otherwise inherit only what the implementation left undeclared.
     merged[name] = {
-      ...entry,
-      _inputSerde: entry._inputSerde ?? contract?._inputSerde,
-      _outputSerde: entry._outputSerde ?? contract?._outputSerde,
-      _shared: entry._shared ?? contract?._shared,
+      ...declared,
+      _inputSerde: declared._inputSerde ?? contract?._inputSerde,
+      _outputSerde: declared._outputSerde ?? contract?._outputSerde,
+      _shared: contract?._shared ?? declared._shared,
       _effectHandler: {
-        ...entry._effectHandler,
-        shared: entry._effectHandler.shared || contract?._shared === true,
+        ...declared._effectHandler,
+        shared: contract?._shared === true || declared._effectHandler.shared,
       },
     };
   }
@@ -619,6 +764,29 @@ function finish(
     _appRuntime: slot,
   });
 }
+
+/**
+ * A plain service's handler map: no handler may be shared.
+ *
+ * Services have no shared/exclusive distinction — there is no state and no
+ * exclusive lock to share against — so `sharedHandler` in a `service` is
+ * meaningless rather than harmless.
+ */
+export type ServiceHandlerShape<H> = {
+  readonly [N in keyof H]: Handler<any, any, any, false>;
+};
+
+/**
+ * A workflow's handler map: `run` is exclusive, the rest may be shared.
+ *
+ * A workflow's `run` handler is its single exclusive execution, so declaring it
+ * shared contradicts the definition.
+ */
+export type WorkflowHandlerShape<H> = {
+  readonly [N in keyof H]: N extends "run"
+    ? Handler<any, any, any, false>
+    : Handler<any, any, any, boolean>;
+};
 
 /** Every capability, re-exported for the type-level tests. @internal */
 export type AllCapabilities = RestateCapability;

@@ -13,7 +13,7 @@
 //
 //   /basics    journaled steps, concurrency, races, bounded fan-out
 //   /time      durable sleep, durable timeout, durable retry
-//   /saga      compensation with runExit, and with acquireRelease
+//   /saga      compensation with Effect.exit, and with acquireRelease
 //   /cart      virtual-object state; shared vs exclusive handlers
 //   /approval  a workflow: durable promise, background fiber, deadline
 //   /users     application services from a Layer
@@ -31,7 +31,7 @@ import { approval } from "./05-workflow.js";
 import { DbLayer, users } from "./06-layers.js";
 
 // One layer for the whole endpoint: handlers that need nothing simply do not
-// mention it. (`restate.bind` is the other option — it hands plain SDK
+// mention it. (`restate.endpoint.bind` is the other option — it hands plain SDK
 // definitions to an endpoint that also serves promise-SDK services.)
 void restate.serve({
   services: [basics, time, saga, cart, approval, users],

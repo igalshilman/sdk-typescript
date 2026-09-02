@@ -32,7 +32,7 @@ export const failing = restate.object({
 
     callTerminallyFailingCall: restate.handler({}, (f: FailureToPropagate) =>
       Effect.gen(function* () {
-        yield* restate.call<FailureToPropagate, void>({
+        yield* restate.rpc.call<FailureToPropagate, void>({
           service: "Failing",
           method: "terminallyFailingCall",
           key: "random-583e1bf2",
@@ -99,21 +99,23 @@ export const failing = restate.object({
       {},
       (retryPolicyMaxRetryCount: number) =>
         Effect.gen(function* () {
-          const outcome = yield* restate.runExit(
-            "sideEffect",
-            Effect.suspend(() => {
-              eventualFailureSideEffects += 1;
-              return Effect.die(
-                new Error(`Failed at attempt: ${eventualFailureSideEffects}`)
-              );
-            }),
-            {
-              retry: {
-                maxAttempts: retryPolicyMaxRetryCount,
-                initialInterval: 1,
-                exponentiationFactor: 1.0,
-              },
-            }
+          const outcome = yield* Effect.exit(
+            restate.run(
+              "sideEffect",
+              Effect.suspend(() => {
+                eventualFailureSideEffects += 1;
+                return Effect.die(
+                  new Error(`Failed at attempt: ${eventualFailureSideEffects}`)
+                );
+              }),
+              {
+                retry: {
+                  maxAttempts: retryPolicyMaxRetryCount,
+                  initialInterval: 1,
+                  exponentiationFactor: 1.0,
+                },
+              }
+            )
           );
           if (Exit.isSuccess(outcome)) {
             return yield* Effect.die(new Error("Side effect did not fail."));

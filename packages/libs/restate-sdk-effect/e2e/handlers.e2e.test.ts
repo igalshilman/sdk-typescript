@@ -239,10 +239,10 @@ const basics = restate.service({
     // Saga: observe a failing step as an Exit and compensate.
     saga: restate.handler({ input: Schema.Void, output: Schema.String }, () =>
       Effect.gen(function* () {
-        const charged = yield* restate.runExit(
-          "charge",
-          Effect.die(new Error("card declined")),
-          { retry: { maxAttempts: 1 } }
+        const charged = yield* Effect.exit(
+          restate.run("charge", Effect.die(new Error("card declined")), {
+            retry: { maxAttempts: 1 },
+          })
         );
         if (Exit.isSuccess(charged)) return "charged";
         const refund = yield* restate.run("refund", Effect.succeed("refunded"));
@@ -289,31 +289,32 @@ const counter = restate.object({
         )
     ),
 
-    // The in-handler client's positional rule, at runtime.
+    // The in-handler client's branded options, at runtime.
     //
-    // Options live in second position, so the idempotency key must reach
-    // Restate as a header (the two calls dedupe to one execution) and an
-    // options-shaped body must survive as the body. Checked through both a
-    // definition and an imported `iface` contract, since a contract carries its
-    // own descriptors.
+    // A branded `rpc.opts` must reach Restate as a header (the two calls dedupe
+    // to one execution) while an options-shaped body must survive as the body.
+    // Checked through both a definition and an imported `iface` contract, since
+    // a contract carries its own descriptors.
     clientRules: restate.handler(
       { input: Schema.String, output: Schema.String },
       (key) =>
         Effect.gen(function* () {
           const viaDefinition = restate.client(basics);
-          const first = yield* viaDefinition.countPings(undefined, {
-            idempotencyKey: key,
-          });
-          const second = yield* viaDefinition.countPings(undefined, {
-            idempotencyKey: key,
-          });
+          const first = yield* viaDefinition.countPings(
+            restate.rpc.opts({ idempotencyKey: key })
+          );
+          const second = yield* viaDefinition.countPings(
+            restate.rpc.opts({ idempotencyKey: key })
+          );
+          // An options-shaped *body* is still a body: the brand is what marks
+          // options, so this reaches the callee untouched.
           const echoed = yield* viaDefinition.echoOptionsShaped({
             idempotencyKey: "body",
           });
           const viaContract = restate.client(basicsContract);
-          const third = yield* viaContract.countPings(undefined, {
-            idempotencyKey: key,
-          });
+          const third = yield* viaContract.countPings(
+            restate.rpc.opts({ idempotencyKey: key })
+          );
           return `${first === second}:${first === third}:${echoed}`;
         })
     ),

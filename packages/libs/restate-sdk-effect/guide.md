@@ -55,11 +55,11 @@ const user = yield* restate.run("fetch-user", fetchUser(id));
 
 The inner effect must not fail in a typed way (`Effect<A, never, R>`): only a
 value can be journaled. Handle expected errors inside the step, or `Effect.die`
-to force an infrastructure retry, or use `restate.runExit` to observe the
+to force an infrastructure retry, or wrap the step in `Effect.exit` to observe the
 outcome:
 
 ```ts
-const charged = yield* restate.runExit("charge", charge(order));
+const charged = yield* Effect.exit(restate.run("charge", charge(order)));
 if (Exit.isFailure(charged)) {
   yield* restate.run("notify-failure", notify(order));
 }
@@ -252,11 +252,11 @@ restate.serve({ services: [greeter, counter], layer: AppLayer, port: 9080 });
 
 Other entry points:
 
-- `restate.createEndpointHandler({ services, layer })` — when you own the HTTP
+- `restate.endpoint.createHandler({ services, layer })` — when you own the HTTP
   server;
-- `restate.bind({ services, layer })` — returns plain SDK definitions, for an
+- `restate.endpoint.bind({ services, layer })` — returns plain SDK definitions, for an
   endpoint that also serves promise-SDK or `restate-sdk-gen` services;
-- `restate.dispose(services)` — closes the application layer's scope.
+- `restate.endpoint.dispose(services)` — closes the application layer's scope.
 
 ## 10. Testing
 

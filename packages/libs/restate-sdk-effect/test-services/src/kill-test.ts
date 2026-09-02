@@ -24,7 +24,7 @@ export const killTestSingleton = restate.object({
         const callback = yield* restate.awakeable();
         yield* restate.sendClient(awakeableHolder, key).hold(callback.id);
         yield* callback.result;
-        yield* restate.call<void, void>({
+        yield* restate.rpc.call<void, void>({
           service: "KillTestSingleton",
           method: "recursiveCall",
           key,

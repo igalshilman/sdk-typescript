@@ -92,8 +92,9 @@ There is deliberately **no** `Restate.sleep`, `Restate.timeout`,
 
 ```ts
 restate.run(name, effect, opts?)      // a journaled step
-restate.runExit(name, effect, opts?)  // ...observed as an Exit, for sagas
-restate.state.get / set / clear / clearAll / keys
+Effect.exit(restate.run(...))         // ...observed as an Exit, for sagas
+restate.state("count", Schema.Number) // a key with its codec bound once
+restate.state.get / set / clear / clearAll / keys   // ...or ad hoc
 restate.key                           // the object / workflow key
 restate.awakeable(schema)             // { id, result }
 restate.resolveAwakeable / rejectAwakeable
@@ -101,9 +102,50 @@ restate.client(Contract, key?)        // typed request-response RPC
 restate.sendClient(Contract, key?)    // typed one-way RPC
 restate.workflowPromise(name, schema)
 restate.signal / attach / cancel
-restate.handlerRequest / uuid / isProcessing / invocationSignal
-restate.rawContext / restate.durable(name, ctx => RestatePromise)  // escape hatch
+restate.handlerRequest / uuid
 ```
+
+Four namespaces keep the root about authoring:
+
+```ts
+restate.rpc.opts / sendOpts            // branded client call options
+restate.rpc.call / send / detached     // calls addressed by name
+restate.endpoint.bind / createHandler / dispose
+restate.unsafe.rawContext / durable    // escape hatches
+restate.diagnostics.isProcessing / abortSignal
+```
+
+## Clients
+
+Options are branded, so a call that takes no input still reads cleanly and a
+request body is never mistaken for options:
+
+```ts
+yield* restate.client(Greeter).greet("Sam", restate.rpc.opts({ idempotencyKey: "x" }));
+yield* restate.client(Pinger).ping(restate.rpc.opts({ idempotencyKey: "x" }));
+yield* restate.sendClient(Greeter).greet("later", restate.rpc.sendOpts({ delay: 60_000 }));
+```
+
+## Contracts
+
+A contract declares handler names and codecs with no implementation; put it in
+a package both sides import. `implement` then takes plain functions — the
+contract already owns the codecs and which handlers are shared:
+
+```ts
+const Greeter = restate.iface.service("greeter", {
+  greet: restate.iface.schema({ input: Schema.String, output: Schema.String }),
+  ping: restate.iface.json<void, string>(),
+});
+
+const greeter = restate.implement(Greeter, {
+  greet: (name) => Effect.succeed(`Hello ${name}`),
+  ping: () => Effect.succeed("pong"),
+});
+```
+
+Reach for `restate.handler(...)` in a slot that needs handler-local discovery
+options or a declared domain-error codec.
 
 ## Virtual objects and workflows
 
@@ -182,8 +224,14 @@ const result = yield* restate.client(Shop).order("unicorn").pipe(
 );
 ```
 
-Undeclared failures and defects are *not* terminal: Restate retries the
-attempt. Interruption reports the invocation as cancelled.
+Declaring the codec is not optional: a handler whose effect can fail with a
+domain error and has no `error:` codec is a **compile error**. Say
+`Effect.orDie` if the failure really is a bug — then it is a defect, Restate
+retries the attempt, and that choice is visible in the code.
+
+`RestateFailure` is exempt, because every durable operation can produce one:
+letting it escape propagates it terminally with its original code. Defects are
+retried. Interruption reports the invocation as cancelled.
 
 ## Documentation
 
