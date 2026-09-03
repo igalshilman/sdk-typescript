@@ -138,22 +138,29 @@ still prints.
 Every item lands with tests; these all pass before the work is called done.
 
 - [x] **V-1** 68 unit tests green (`pnpm _test`).
-- [ ] **V-2** `55+` e2e tests green against a real container
+- [x] **V-2** 55 e2e tests green against a real container
       (`vitest run --config vitest.e2e.config.ts`).
 - [x] **V-3** `turbo run lint _check:types _build _check:exports _check:api
   _test check:format --filter="./packages/libs/*"` — 57/57.
-- [ ] **V-4** 267 official conformance tests, 0 exclusions
+- [x] **V-4** 267 official conformance tests, 0 exclusions
       (`.tools/run-sdk-tests.sh --effect`, needs Java + Docker).
 - [x] **V-5** Docs consistent with the final surface: README (new Clients and
       Contracts sections, the namespaces, the error rule), guide, SHARP-EDGES,
       DESIGN §6, tutorial. Note `*.md` is in `.prettierignore` — do not run
       prettier over these files; it rewrites emphasis markers and tables and
       buries the real diff.
-- [ ] **V-6** Post the revision to the review channel for re-probing.
+- [x] **V-6** Posted to the review channel for re-probing (message 120).
 
 ## Left for a human
 
 - [ ] **👤 S6-6** `pnpm changeset` before release (interactive).
+
+## Note for whoever reviews this branch
+
+`flake.nix` and `flake.lock` are in the API-revision commit (`fcc63d6`) by
+accident: they were already staged, and the commit was made without a
+pathspec. They belong to the nix dev shell, not to this work. Left in place
+deliberately rather than rewriting a pushed branch.
 
 ## Deferred by agreement
 
