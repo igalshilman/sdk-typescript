@@ -9,7 +9,7 @@
  * https://github.com/restatedev/sdk-typescript/blob/main/LICENSE
  */
 
-// Tier 1: journaled steps, and concurrency over them.
+// Tier 1: external activities, and concurrency over them.
 //
 //   curl localhost:8080/basics/hello      --json '"world"'
 //   curl localhost:8080/basics/sequential --json '"o-1"'
@@ -24,11 +24,10 @@ import { chargeCard, reserveStock } from "./fakes.js";
 export const basics = restate.service({
   name: "basics",
   handlers: {
-    // One journal entry. The closure runs on the first execution; every
-    // replay serves the recorded value without re-running it.
+    // Pure deterministic effects need no Restate wrapper.
     hello: restate.handler(
       { input: Schema.String, output: Schema.String },
-      (name) => restate.run("compose", Effect.succeed(`Hello, ${name}!`))
+      (name) => Effect.succeed(`Hello, ${name}!`)
     ),
 
     // Two entries, in source order.
@@ -36,11 +35,12 @@ export const basics = restate.service({
       { input: Schema.String, output: Schema.String },
       (orderId) =>
         Effect.gen(function* () {
-          const reservation = yield* restate.run(
-            "reserve",
-            reserveStock(orderId)
+          const reservation = yield* reserveStock(orderId).pipe(
+            restate.activity("reserve", { result: Schema.String })
           );
-          const receipt = yield* restate.run("charge", chargeCard(orderId));
+          const receipt = yield* chargeCard(orderId).pipe(
+            restate.activity("charge", { result: Schema.String })
+          );
           return `${reservation} / ${receipt}`;
         })
     ),
@@ -53,8 +53,12 @@ export const basics = restate.service({
         Effect.map(
           Effect.all(
             [
-              restate.run("reserve", reserveStock(orderId)),
-              restate.run("charge", chargeCard(orderId)),
+              reserveStock(orderId).pipe(
+                restate.activity("reserve", { result: Schema.String })
+              ),
+              chargeCard(orderId).pipe(
+                restate.activity("charge", { result: Schema.String })
+              ),
             ],
             { concurrency: "unbounded" }
           ),
@@ -67,8 +71,12 @@ export const basics = restate.service({
       { input: Schema.String, output: Schema.String },
       (orderId) =>
         Effect.race(
-          restate.run("charge", chargeCard(orderId)),
-          restate.run("reserve", reserveStock(orderId))
+          chargeCard(orderId).pipe(
+            restate.activity("charge", { result: Schema.String })
+          ),
+          reserveStock(orderId).pipe(
+            restate.activity("reserve", { result: Schema.String })
+          )
         )
     ),
 
@@ -81,7 +89,10 @@ export const basics = restate.service({
       (items) =>
         Effect.forEach(
           items,
-          (item, i) => restate.run(`item-${i}`, reserveStock(item)),
+          (item, i) =>
+            reserveStock(item).pipe(
+              restate.activity(`item-${i}`, { result: Schema.String })
+            ),
           {
             concurrency: 3,
           }

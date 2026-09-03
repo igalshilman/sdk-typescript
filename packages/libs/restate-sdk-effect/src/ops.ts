@@ -98,8 +98,8 @@ export const uuid: Effect.Effect<string, never, RestateContext> = contextRead(
 
 /**
  * An `AbortSignal` for this invocation, aborted when cancellation arrives or
- * the attempt ends. Rarely needed: `restate.run` closures already receive
- * cancellation through their own signal.
+ * the attempt ends. Rarely needed: `restate.activity` / `restate.run` effects
+ * already receive cancellation through their own signal.
  */
 export const abortSignal: Effect.Effect<AbortSignal, never, RestateContext> =
   contextRead((env) => env.driver.abortSignal);
@@ -326,7 +326,7 @@ export interface Awakeable<T> {
  *
  * ```ts
  * const cb = yield* restate.awakeable(Schema.String);
- * yield* restate.run("ask", requestApproval(cb.id));
+ * yield* requestApproval(cb.id).pipe(restate.activity("ask"));
  * const decision = yield* cb.result; // suspends until someone resolves it
  * ```
  */

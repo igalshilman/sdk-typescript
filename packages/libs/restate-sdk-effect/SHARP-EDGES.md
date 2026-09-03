@@ -14,8 +14,8 @@ unjournaled async detected — the durable operation "…" was created while no
 fiber should have been running.
 ```
 
-The fix is always the same: move the async work inside `restate.run`, where the
-real world is allowed.
+The fix is always the same: wrap the external Effect with
+`restate.activity(name, options)`, where the real world is allowed.
 
 The check is **best-effort**, so do not rely on it to find these for you. It
 fires on the *journal operation*, not on the wake, and three cases slip past:
@@ -28,7 +28,7 @@ fires on the *journal operation*, not on the wake, and three cases slip past:
 
 All three are rule-1 violations, so determinism still holds for code that obeys
 rule 1; what you may not get is the diagnostic. Prefer a library that accepts an
-`AbortSignal`, and call it from a `run` closure.
+`AbortSignal`, and call it from an activity.
 
 ## Cancellation is not swallowable
 
@@ -42,7 +42,10 @@ interruption, by design.
 If you need catch-and-continue semantics, do the cleanup in a finalizer:
 
 ```ts
-Effect.acquireRelease(startWork, () => restate.run("cleanup", cleanup()))
+Effect.acquireRelease(
+  startWork.pipe(restate.activity("start")),
+  () => cleanup().pipe(restate.activity("cleanup"))
+)
 ```
 
 Finalizers may perform journal operations; the driver keeps running until they
@@ -146,8 +149,8 @@ yield* Effect.all(
 With N durable operations pending concurrently, each delivery costs one
 combinator entry — the price of journaling the interleaving. Sequential code
 costs nothing extra (a single pending operation is awaited directly). A fan-out
-of thousands of concurrent steps is therefore expensive; batch inside a `run`,
-or bound the concurrency.
+of thousands of concurrent steps is therefore expensive; batch the underlying
+I/O inside one activity, or bound the concurrency.
 
 ## `uninterruptible` + suspension
 
@@ -159,12 +162,14 @@ in a later attempt and replay rebuilds everything). Do not treat an
 `uninterruptible` block as a guarantee that a finalizer runs "soon"; treat it as
 a guarantee about ordering within an attempt.
 
-## A `run` closure cannot use Restate operations
+## An activity cannot use Restate operations
 
 By design: its result is one journal entry, and nested entries would be
-invisible to the driver. The type system enforces it — a `run` whose closure
-requires a Restate capability produces an unsatisfiable requirement named
-`RestateOperationsAreNotAllowedInsideRun`.
+invisible to the driver. The type system enforces it — an activity whose
+wrapped Effect requires a Restate capability produces an unsatisfiable
+requirement named `RestateOperationsAreNotAllowedInsideActivity`. The
+lower-level `run` has the equivalent `RestateOperationsAreNotAllowedInsideRun`
+diagnostic.
 
 ## Handler `E` must be declared to be encodable
 

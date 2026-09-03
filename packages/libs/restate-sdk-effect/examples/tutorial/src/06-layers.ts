@@ -41,10 +41,9 @@ export const users = restate.service({
         Effect.gen(function* () {
           if (id === "") return yield* new UnknownUser({ id });
           const db = yield* Db;
-          // The closure runs on the application runtime: real clock, real I/O.
-          return yield* restate.run(
-            "lookup",
-            Effect.promise(() => db.lookup(id))
+          // The activity runs on the application runtime: real clock, real I/O.
+          return yield* Effect.promise(() => db.lookup(id)).pipe(
+            restate.activity("lookup", { result: Schema.String })
           );
         })
     ),

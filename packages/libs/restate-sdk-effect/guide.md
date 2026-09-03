@@ -7,7 +7,7 @@ This guide covers authoring services with `@restatedev/restate-sdk-effect`. For
 Everything below assumes:
 
 ```ts
-import { Effect, Schema } from "effect";
+import { Effect, Schedule, Schema } from "effect";
 import * as restate from "@restatedev/restate-sdk-effect";
 ```
 
@@ -42,42 +42,65 @@ Handler options:
 | `description`, `metadata` | surfaced in discovery |
 | `enableLazyState` | opt into lazy state (Restate 1.4+) |
 
-## 2. Journaled steps
+## 2. External activities
 
-`restate.run(name, effect)` records the result of `effect` in the journal. On a
-retry or a resume, the step is not re-executed — its recorded value is served
-instead:
-
-```ts
-const id = yield* restate.run("gen-id", Effect.sync(() => crypto.randomUUID()));
-const user = yield* restate.run("fetch-user", fetchUser(id));
-```
-
-The inner effect must not fail in a typed way (`Effect<A, never, R>`): only a
-value can be journaled. Handle expected errors inside the step, or `Effect.die`
-to force an infrastructure retry, or wrap the step in `Effect.exit` to observe the
-outcome:
+Pipe an external Effect through `restate.activity(name, options)` to record its
+outcome in the journal. On replay, the Effect is not re-executed — its recorded
+outcome is served instead:
 
 ```ts
-const charged = yield* Effect.exit(restate.run("charge", charge(order)));
-if (Exit.isFailure(charged)) {
-  yield* restate.run("notify-failure", notify(order));
-}
+const id = yield* Effect.sync(() => crypto.randomUUID()).pipe(
+  restate.activity("gen-id", { result: Schema.String })
+);
+const user = yield* fetchUser(id).pipe(
+  restate.activity("fetch-user", { result: User, error: FetchUserError })
+);
 ```
 
-The closure runs on your **application** runtime — the real clock, the real
-scheduler, real I/O — and receives cancellation through Restate's own abort
-plumbing. Journal operations are not available inside it, and using one is a
-compile error.
-
-Retries of the step itself are Restate's, configured per call:
+Successes and declared typed failures are both journaled. The typed failure is
+then restored to Effect's error channel, so Effect owns domain policy. Defects
+are not encoded: they reject the underlying Restate run, so Restate owns its
+technical retry policy. If Restate gives up, the activity fails with
+`RestateFailure` in addition to its declared error:
 
 ```ts
-yield* restate.run("charge", charge(order), {
-  retry: { maxAttempts: 5, initialInterval: 200, maxInterval: 5_000 },
-  codec: Receipt,
-});
+const charged = yield* charge(order).pipe(
+  restate.activity("charge", { result: Receipt, error: PaymentDeclined }),
+  Effect.retry({
+    schedule: Schedule.exponential("1 second"),
+    times: 4,
+    while: (error) => error instanceof PaymentDeclined,
+  })
+);
 ```
+
+Filtering the retry matters: an unfiltered `Effect.retry` would also retry a
+`RestateFailure` after Restate had exhausted the technical policy. Every retry
+of `PaymentDeclined` above is a fresh journaled activity; every schedule delay
+is a durable timer.
+
+The wrapped Effect runs on your **application** runtime — the real clock, real
+scheduler and real I/O — and receives cancellation through Restate's abort
+plumbing. Journal operations are unavailable inside it, and using one is a
+compile error. Keep an activity to one independently committable external
+operation; wrapping a large workflow would make all of it repeat after a
+technical failure.
+
+Restate-owned defect retries are configured on the activity:
+
+```ts
+yield* charge(order).pipe(
+  restate.activity("charge", {
+    result: Receipt,
+    error: PaymentDeclined,
+    retry: { maxAttempts: 5, initialInterval: 200, maxInterval: 5_000 },
+  })
+);
+```
+
+`restate.run(name, effect, options)` remains as the lower-level form for an
+already-infallible `Effect<A, never, R>`. Most application code should use
+`activity`.
 
 ## 3. Time, randomness, logging
 
@@ -105,18 +128,23 @@ Ordinary Effect concurrency, over durable operations:
 ```ts
 // parallel durable steps
 const [user, stock] = yield* Effect.all(
-  [restate.run("user", fetchUser(id)), restate.run("stock", checkStock(items))],
+  [
+    fetchUser(id).pipe(restate.activity("user")),
+    checkStock(items).pipe(restate.activity("stock")),
+  ],
   { concurrency: "unbounded" }
 );
 
 // bounded fan-out
-yield* Effect.forEach(items, (it, i) => restate.run(`ship-${i}`, ship(it)), {
-  concurrency: 5,
-});
+yield* Effect.forEach(
+  items,
+  (it, i) => ship(it).pipe(restate.activity(`ship-${i}`)),
+  { concurrency: 5 }
+);
 
 // race: the winner is journaled, the loser is interrupted and finalized
 const first = yield* Effect.race(
-  restate.run("primary", callPrimary()),
+  callPrimary().pipe(restate.activity("primary")),
   Effect.as(Effect.sleep("5 seconds"), "timeout")
 );
 
@@ -231,7 +259,7 @@ To decode a callee's declared error back into a tagged error, add
 ```ts
 // awakeable: completed from outside, by id
 const approval = yield* restate.awakeable(Schema.Boolean);
-yield* restate.run("ask-human", requestApproval(approval.id));
+yield* requestApproval(approval.id).pipe(restate.activity("ask-human"));
 const approved = yield* approval.result; // suspends until resolved
 
 // from anywhere else

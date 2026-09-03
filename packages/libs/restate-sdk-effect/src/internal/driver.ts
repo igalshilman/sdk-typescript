@@ -83,8 +83,8 @@ export class UnjournaledAsyncError extends Error {
       `@restatedev/restate-sdk-effect: unjournaled async detected — the ` +
         `durable operation "${op}" was created while no fiber should have ` +
         `been running. Something outside the journal (a raw setTimeout, an ` +
-        `unwrapped Promise, a library callback) resumed a fiber. Wrap that ` +
-        `work in Restate.run.`
+        `unwrapped Promise, a library callback) resumed a fiber. Pipe that ` +
+        `work through restate.activity(...).`
     );
     this.name = "UnjournaledAsyncError";
   }

@@ -286,15 +286,17 @@ one and converts the other:
    from the journal, so every sleep must be a durable timer. This is also
    the semantically correct behavior for durable handlers: an in-process
    timer that doesn't survive suspension is almost always a bug. Code
-   that genuinely needs wall-clock waiting belongs inside `Restate.run`,
-   where real async is legal.
+   that genuinely needs wall-clock waiting belongs inside a
+   `Restate.activity`, where real async is legal.
 
 Consequences that fall out for free: `Effect.sleep("30 minutes")`
 suspends the invocation; `Effect.retry(Schedule.exponential("1s"))`
-around a `Restate.run` is a **durable domain-level retry** (each attempt
-a fresh journaled step, each backoff a durable timer, resumable
-mid-backoff) — cleanly layered *above* `ctx.run`'s own infra retry
-policy, which remains the tool for transient step failures.
+around a `Restate.activity` is a **durable domain-level retry** (each
+typed-failure attempt a fresh journaled activity, each backoff a durable
+timer, resumable mid-backoff). It is cleanly layered above `ctx.run`'s
+own technical retry policy for defects. The retry predicate must select
+the domain error so an exhausted `RestateFailure` is not retried as a
+new activity.
 
 ---
 
@@ -303,15 +305,15 @@ policy, which remains the tool for transient step failures.
 Everything the deterministic runtime cannot see must go through the
 journal. The rules reduce to:
 
-1. **All real-world async goes through `Restate.run`.** Raw
+1. **All real-world effects go through `Restate.activity`.** Raw
    `Effect.promise`/`tryPromise`/`Effect.callback` in handler code is
-   illegal (it wakes fibers from outside the journal). Inside a
-   `Restate.run` closure, anything goes — it executes on the *application
-   runtime* (real Clock, real scheduler) and only its journaled result
-   re-enters the deterministic world.
+   illegal (it wakes fibers from outside the journal). The wrapped Effect
+   executes on the *application runtime* (real Clock, real scheduler), and
+   only its journaled success or typed failure re-enters the deterministic
+   world. Defects reject the underlying `ctx.run` for Restate to retry.
 2. **No unsafe sync nondeterminism in handler code** (`Date.now()`,
    `Math.random()`, `crypto.randomUUID()`) — the journaled `Clock`,
-   `Random`, and `Restate.run` cover every idiom.
+   `Random`, and `Restate.activity` cover every idiom.
 3. **Journal-crossing values must be serializable** (Schema-governed;
    §6.3).
 
@@ -321,8 +323,8 @@ being precise about "partly" matters more than the check does. The check
 is on journal ops, not on wakes: **a journal op created while the
 multiplexer is parked (i.e. outside a drain) is the product of a wake the
 journal did not cause.** We own every journal call site, so that case
-dies with a pointed diagnostic ("unjournaled async detected — wrap it in
-Restate.run") instead of surfacing as journal corruption three days
+dies with a pointed diagnostic ("unjournaled async detected — pipe it through
+restate.activity") instead of surfacing as journal corruption three days
 later.
 
 It is **best-effort, not complete**, and two holes are known (probed by
@@ -398,10 +400,9 @@ Durable primitives that need explicit calls (everything else is ambient
 via Clock/Random/Logger or plain Effect combinators):
 
 ```ts
-run(name, effect, opts?)      // journaled step; effect runs on the app runtime,
-                              // R scrubbed of Restate capabilities (compile error
-                              // for nested journal ops — overeng's trick)
-Effect.exit(run(...))        // observe outcome as Exit (sagas/compensation)
+activity(name, opts?)(effect) // preferred external-effect boundary; typed
+                              // successes and failures are journaled
+run(name, effect, opts?)      // lower-level form for an infallible Effect
 awakeable(schema?)            // { id, await: Effect<T> }
 resolveAwakeable / rejectAwakeable
 state / sharedState           // Schema-typed K/V (objects, workflows)
@@ -468,8 +469,9 @@ Adopted from overeng decision 0002: flat marker tags in `R` —
 each construct's materialization (exclusive object handlers get
 `StateRead | StateWrite`; shared get `StateRead`; workflow `run` gets the
 full set). Illegal ops (writing state in a shared handler) are compile
-errors. `Restate.run` scrubs all of them plus `RestateContext` from its
-inner effect's `R`, so journal ops inside a run closure don't typecheck.
+errors. `Restate.activity` and `Restate.run` scrub all of them plus
+`RestateContext` from the wrapped effect's `R`, so nested journal operations
+don't typecheck.
 
 ---
 
@@ -485,10 +487,10 @@ Adopted from overeng decision 0003, unchanged in substance:
   attempt. A failure that doesn't match the declared error schema is a
   defect (classification drift never silently mis-encodes).
 - **Interruption → `CancelledError`** (not retried).
-- `Restate.run`'s inner effect is `Effect<A, never, R>` (clean E; die
-  inside the step to force an infra retry; observe with `Effect.exit` for
-  sagas). Typed-failure transport through `run` (journaling an encoded
-  `Exit`) is deferred, as overeng also concluded.
+- `Restate.activity` journals an encoded success-or-typed-failure envelope.
+  Typed failures return to Effect's `E` channel for domain policy; defects
+  reject `ctx.run` for Restate-owned technical retry. `Restate.run` remains
+  the lower-level success-only form (`Effect<A, never, R>`).
 - Awakeable/durable-promise rejections terminalize **verbatim**.
 
 ## 8. Concurrency semantics (the contracts users rely on)
@@ -596,14 +598,19 @@ const process = (order: Order) =>
   Effect.gen(function* () {
     // parallel durable steps — plain Effect.all
     const [user, stock] = yield* Effect.all(
-      [restate.run("user", fetchUser(order.userId)),
-       restate.run("stock", checkStock(order.items))],
+      [fetchUser(order.userId).pipe(restate.activity("user")),
+       checkStock(order.items).pipe(restate.activity("stock"))],
       { concurrency: "unbounded" });
 
     // durable timeout + durable domain retry — plain Effect operators
-    const payment = yield* restate.run("charge", charge(order)).pipe(
+    const payment = yield* charge(order).pipe(
+      restate.activity("charge", { result: Receipt, error: ChargeError }),
       Effect.timeout("30 seconds"),
-      Effect.retry({ schedule: Schedule.exponential("1 second"), times: 4 }));
+      Effect.retry({
+        schedule: Schedule.exponential("1 second"),
+        times: 4,
+        while: (error) => error instanceof ChargeError,
+      }));
 
     // background progress reporter, interrupted+finalized at scope end
     const events = yield* Queue.make<string>();
@@ -611,7 +618,7 @@ const process = (order: Order) =>
 
     // bounded fan-out over durable steps
     yield* Effect.forEach(order.items,
-      (it, i) => restate.run(`ship-${i}`, ship(it)),
+      (it, i) => ship(it).pipe(restate.activity(`ship-${i}`)),
       { concurrency: 5 });
 
     return payment.receiptId;
@@ -735,9 +742,9 @@ to be checked during the port.
    `Scheduler`/`SchedulerDispatcher` shape, and the v4 Schema API (which
    makes overeng's serde a near-verbatim port). Remaining sub-question is
    release timing against 4.0 final, handled by §9's pre-release policy.
-2. **`run` typed-failure transport** (journaled Schema-encoded `Exit`):
-   defer to v1.1 (overeng reached the same conclusion), or include
-   behind an explicit `error` schema from day one?
+2. ~~**External activity typed-failure transport**~~ — **closed.**
+   `activity(name, { result, error })` journals a tagged outcome envelope;
+   defects remain outside the envelope and are retried by Restate.
 3. **Ingress client** (`clients.connect` Effect wrapper with typed error
    decode): v1 or fast-follow?
 4. **Journal-cost optimization** for wide fan-outs (batched delivery /

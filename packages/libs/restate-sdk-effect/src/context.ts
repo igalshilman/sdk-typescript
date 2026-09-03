@@ -45,8 +45,8 @@ export interface InvocationDriver {
    * `onInterrupt` runs if the parked fiber is interrupted before the operation
    * settles — a race loser, a timeout, an enclosing scope closing. The journal
    * entry itself is already created and will still be completed by Restate;
-   * this is for the *external* work behind it, which is why `Restate.run` uses
-   * it to abort its closure's `AbortSignal`.
+   * this is for the *external* work behind it, which is why `activity` and
+   * `run` use it to abort the wrapped Effect's `AbortSignal`.
    */
   park<A>(
     op: string,
@@ -79,8 +79,8 @@ export interface RestateInvocation {
   /** The journal multiplexer driving this invocation. */
   readonly driver: InvocationDriver;
   /**
-   * The application services, without this invocation's overrides. `Restate.run`
-   * closures execute against these — real clock, real scheduler.
+   * The application services, without this invocation's overrides. Activities
+   * and `run` effects execute against these — real clock, real scheduler.
    */
   readonly appContext: Context.Context<never>;
   /** Wall-clock reading frozen at attempt entry; log timestamps only. */
@@ -137,16 +137,15 @@ export interface ObjectKey {
 }
 
 /**
- * The `AbortSignal` of the surrounding `restate.run`, available *inside* a run
- * closure — pass it to AbortSignal-aware APIs (`fetch(url, { signal })`) so
- * in-flight work stops promptly when the invocation is cancelled or the attempt
- * ends.
+ * The `AbortSignal` of the surrounding `restate.activity` / `restate.run` —
+ * pass it to AbortSignal-aware APIs (`fetch(url, { signal })`) so in-flight
+ * work stops promptly when the invocation is cancelled or the attempt ends.
  *
  * ```ts
- * yield* restate.run("fetch", Effect.gen(function* () {
+ * yield* Effect.gen(function* () {
  *   const { signal } = yield* restate.RunSignal;
  *   return yield* Effect.promise(() => fetch(url, { signal }).then((r) => r.json()));
- * }));
+ * }).pipe(restate.activity("fetch"));
  * ```
  */
 export const RunSignal: Context.Service<RunSignal, RunSignal> =

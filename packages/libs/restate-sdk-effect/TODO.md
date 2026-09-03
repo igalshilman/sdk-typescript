@@ -132,12 +132,15 @@ still prints.
 - [x] **E-3** `iface.schema({ input, output })` and `iface.shared.schema(...)`
       in this package's `iface`, so an Effect user writes Schemas rather than
       `iface.serdes({ input: schemaSerde(...) })`. Wraps core's `iface`.
+- [x] **E-4** Add pipeable `activity(name, { result, error, retry })` as the
+      preferred external-effect boundary. Journal typed failures as data for
+      Effect-owned domain retry; leave defects to Restate's technical retry.
 
 ## Verification gate
 
 Every item lands with tests; these all pass before the work is called done.
 
-- [x] **V-1** 68 unit tests green (`pnpm _test`).
+- [x] **V-1** 76 unit tests green (`pnpm _test`).
 - [x] **V-2** 55 e2e tests green against a real container
       (`vitest run --config vitest.e2e.config.ts`).
 - [x] **V-3** `turbo run lint _check:types _build _check:exports _check:api

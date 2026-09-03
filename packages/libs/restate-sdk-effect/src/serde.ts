@@ -15,8 +15,8 @@
 // =============================================================================
 //
 // Everything that crosses the journal — handler input and output, state values,
-// `run` results, awakeable payloads, durable promises — is governed by a Schema.
-// The bridge is deliberately thin:
+// activity outcomes, `run` results, awakeable payloads, durable promises — is
+// governed by a Schema. The bridge is deliberately thin:
 //
 //   - encode/decode go through the Schema (`encodeSync`/`decodeUnknownSync`),
 //     not `JSON.stringify`, so transformations (dates, classes, branded types,

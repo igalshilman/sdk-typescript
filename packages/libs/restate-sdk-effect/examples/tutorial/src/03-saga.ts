@@ -25,33 +25,38 @@ const Order = Schema.Struct({
   fail: Schema.Boolean,
 });
 
+class CardDeclined extends Schema.TaggedError<CardDeclined>()(
+  "CardDeclined",
+  {}
+) {}
+
 export const saga = restate.service({
   name: "saga",
   handlers: {
     // Observe each step's outcome and compensate the ones that succeeded.
     process: restate.handler({ input: Order, output: Schema.String }, (order) =>
       Effect.gen(function* () {
-        const reservation = yield* restate.run(
-          "reserve",
-          reserveStock(order.orderId)
+        const reservation = yield* reserveStock(order.orderId).pipe(
+          restate.activity("reserve", { result: Schema.String })
         );
 
         // `Effect.exit` turns the step's outcome into a value, so a failure
         // becomes something to branch on rather than something to propagate.
         const charged = yield* Effect.exit(
-          restate.run(
-            "charge",
-            order.fail
-              ? Effect.die(new Error("card declined"))
-              : chargeCard(order.orderId),
-            { retry: { maxAttempts: 1 } }
+          (order.fail
+            ? Effect.fail(new CardDeclined())
+            : chargeCard(order.orderId)
+          ).pipe(
+            restate.activity("charge", {
+              result: Schema.String,
+              error: CardDeclined,
+            })
           )
         );
 
         if (Exit.isFailure(charged)) {
-          const released = yield* restate.run(
-            "release",
-            releaseStock(reservation)
+          const released = yield* releaseStock(reservation).pipe(
+            restate.activity("release", { result: Schema.String })
           );
           return `compensated: ${released}`;
         }
@@ -66,19 +71,24 @@ export const saga = restate.service({
       (orderId) =>
         Effect.gen(function* () {
           const receipt = yield* Effect.acquireRelease(
-            restate.run("charge", chargeCard(orderId)),
+            chargeCard(orderId).pipe(
+              restate.activity("charge", { result: Schema.String })
+            ),
             (receipt, exit) =>
               Exit.isSuccess(exit)
                 ? Effect.void
                 : // A finalizer cannot fail: a failing refund is a defect, and
                   // Restate retries the attempt.
                   Effect.asVoid(
-                    Effect.orDie(restate.run("refund", refundCard(receipt)))
+                    Effect.orDie(
+                      refundCard(receipt).pipe(
+                        restate.activity("refund", { result: Schema.String })
+                      )
+                    )
                   )
           );
-          const reservation = yield* restate.run(
-            "reserve",
-            reserveStock(orderId)
+          const reservation = yield* reserveStock(orderId).pipe(
+            restate.activity("reserve", { result: Schema.String })
           );
           return `${receipt} / ${reservation}`;
         }).pipe(Effect.scoped)

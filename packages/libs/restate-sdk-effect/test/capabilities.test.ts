@@ -159,4 +159,34 @@ describe("capability markers", () => {
     assertType<Equals<ServicesOf<typeof fine>, restate.RestateContext>>();
     expect(typeof poisoned).toBe("object");
   });
+
+  it("an activity may not use Restate operations", () => {
+    const poisoned = restate.state
+      .set("k", 1)
+      .pipe(restate.activity("bad-activity"));
+    assertType<
+      Equals<
+        restate.RestateOperationsAreNotAllowedInsideActivity extends ServicesOf<
+          typeof poisoned
+        >
+          ? true
+          : false,
+        true
+      >
+    >();
+
+    const fine = Effect.succeed(1).pipe(restate.activity("ok-activity"));
+    assertType<
+      Equals<
+        restate.RestateOperationsAreNotAllowedInsideActivity extends ServicesOf<
+          typeof fine
+        >
+          ? true
+          : false,
+        false
+      >
+    >();
+    assertType<Equals<ServicesOf<typeof fine>, restate.RestateContext>>();
+    expect(typeof poisoned).toBe("object");
+  });
 });

@@ -242,7 +242,7 @@ describe("driver — unjournaled async detector", () => {
 
   it("exposes the diagnostic as a distinct error type", () => {
     expect(new UnjournaledAsyncError("run(x)").message).toMatch(
-      /wrap that work in Restate\.run/i
+      /pipe that work through restate\.activity/i
     );
   });
 });

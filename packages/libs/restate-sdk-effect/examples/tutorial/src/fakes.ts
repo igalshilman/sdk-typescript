@@ -10,8 +10,8 @@
  */
 
 // Stand-ins for real I/O. Everything here is the kind of code that belongs
-// *inside* a `restate.run` closure: it touches the outside world, takes real
-// time, and sometimes fails.
+// inside a `restate.activity`: it touches the outside world, takes real time,
+// and sometimes fails.
 
 import { Effect } from "effect";
 

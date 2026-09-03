@@ -30,10 +30,9 @@ const greeter = restate.service({
       { input: Schema.String, output: Schema.String },
       (name) =>
         Effect.gen(function* () {
-          // A journaled step: executed once, replayed from the journal after.
-          const id = yield* restate.run(
-            "gen-id",
-            Effect.sync(() => crypto.randomUUID())
+          // An external activity: executed once, replayed from the journal after.
+          const id = yield* Effect.sync(() => crypto.randomUUID()).pipe(
+            restate.activity("gen-id", { result: Schema.String })
           );
 
           // A durable timer: the invocation suspends and resumes an hour later,
@@ -71,28 +70,26 @@ There is deliberately **no** `Restate.sleep`, `Restate.timeout`,
 
 ## The three rules
 
-1. **All real-world async goes through `restate.run`.** A raw
+1. **All real-world effects go through `restate.activity`.** A raw
    `Effect.promise` / `Effect.tryPromise` / `Effect.callback` in handler code
    wakes a fiber from outside the journal, which would diverge on replay. The
    common shapes are caught at runtime — the invocation fails with `unjournaled
    async detected` instead of corrupting its journal — but the check is
    best-effort, not a guarantee ([SHARP-EDGES.md](./SHARP-EDGES.md) lists what
-   slips past), so this is a rule you follow, not one you lean on. Inside a
-   `run` closure anything
-   goes — it executes on your application runtime, with the real clock and the
-   real scheduler, and only its journaled result re-enters the deterministic
-   world.
+   slips past), so this is a rule you follow, not one you lean on. The wrapped
+   Effect executes on your application runtime, with the real clock and real
+   scheduler, and only its journaled outcome re-enters the deterministic world.
 2. **No unsafe sync nondeterminism in handler code** — no `Date.now()`,
    `Math.random()`, `crypto.randomUUID()`. Use `Clock`, `Random`,
-   `restate.uuid`, or wrap it in `restate.run`.
+   `restate.uuid`, or wrap the computation with `restate.activity`.
 3. **Values that cross the journal are Schema-governed** — handler input and
-   output, state, `run` results, awakeable payloads.
+   output, state, activity outcomes, awakeable payloads.
 
 ## Operations that need an explicit call
 
 ```ts
-restate.run(name, effect, opts?)      // a journaled step
-Effect.exit(restate.run(...))         // ...observed as an Exit, for sagas
+effect.pipe(restate.activity(name, opts?)) // preferred external-I/O boundary
+restate.run(name, effect, opts?)            // lower-level, infallible step
 restate.state("count", Schema.Number) // a key with its codec bound once
 restate.state.get / set / clear / clearAll / keys   // ...or ad hoc
 restate.key                           // the object / workflow key
@@ -189,7 +186,9 @@ const orders = restate.service({
     place: restate.handler({ input: Order, output: Schema.String }, (order) =>
       Effect.gen(function* () {
         const db = yield* Db;
-        return yield* restate.run("insert", db.insert(order));
+        return yield* db.insert(order).pipe(
+          restate.activity("insert", { result: Schema.String })
+        );
       })
     ),
   },

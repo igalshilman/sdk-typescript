@@ -24,9 +24,8 @@
  *       { input: Schema.String, output: Schema.String },
  *       (name) =>
  *         Effect.gen(function* () {
- *           const id = yield* restate.run(
- *             "gen-id",
- *             Effect.sync(() => crypto.randomUUID())
+ *           const id = yield* Effect.sync(() => crypto.randomUUID()).pipe(
+ *             restate.activity("gen-id", { result: Schema.String })
  *           );
  *           yield* Effect.sleep("1 hour"); // a durable timer
  *           return `Hello ${name} (${id})`;
@@ -45,7 +44,7 @@
  *
  * Three rules (see the README):
  *
- *  1. all real-world async goes through {@link run};
+ *  1. all real-world effects go through {@link activity};
  *  2. no `Date.now()` / `Math.random()` in handler code — `Clock` and `Random`
  *     are journaled;
  *  3. values that cross the journal are Schema-governed.
@@ -78,8 +77,11 @@ export { serve } from "./endpoint.js";
 // ---------------------------------------------------------------------------
 // durable operations
 // ---------------------------------------------------------------------------
-export { run } from "./run.js";
+export { activity, run } from "./run.js";
 export type {
+  ActivityOptions,
+  ActivityRequirements,
+  RestateOperationsAreNotAllowedInsideActivity,
   RestateOperationsAreNotAllowedInsideRun,
   RetryOptions,
   RunOptions,

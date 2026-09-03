@@ -23,6 +23,11 @@ import { chargeCard, flaky } from "./fakes.js";
 
 const unreliable = flaky("payment-gateway", 2);
 
+class GatewayUnavailable extends Schema.TaggedError<GatewayUnavailable>()(
+  "GatewayUnavailable",
+  { message: Schema.String }
+) {}
+
 export const time = restate.service({
   name: "time",
   handlers: {
@@ -32,7 +37,7 @@ export const time = restate.service({
       (message) =>
         Effect.gen(function* () {
           yield* Effect.sleep("24 hours");
-          return yield* restate.run("send", Effect.succeed(`sent: ${message}`));
+          return `sent: ${message}`;
         })
     ),
 
@@ -40,7 +45,8 @@ export const time = restate.service({
     withDeadline: restate.handler(
       { input: Schema.String, output: Schema.String },
       (orderId) =>
-        restate.run("charge", chargeCard(orderId)).pipe(
+        chargeCard(orderId).pipe(
+          restate.activity("charge", { result: Schema.String }),
           Effect.timeout("5 seconds"),
           Effect.match({
             onFailure: () => "payment timed out",
@@ -56,12 +62,20 @@ export const time = restate.service({
     withRetry: restate.handler(
       { input: Schema.Void, output: Schema.String },
       () =>
-        restate.run("call-gateway", Effect.orDie(unreliable)).pipe(
+        unreliable.pipe(
+          Effect.mapError(
+            (error) => new GatewayUnavailable({ message: error.message })
+          ),
+          restate.activity("call-gateway", {
+            result: Schema.String,
+            error: GatewayUnavailable,
+          }),
           Effect.retry({
             schedule: Schedule.exponential("1 second"),
             times: 4,
+            while: (error) => error instanceof GatewayUnavailable,
           }),
-          Effect.catchTag("RestateFailure", (failure) =>
+          Effect.catch((failure) =>
             Effect.succeed(`gave up: ${failure.message}`)
           )
         )

@@ -7,7 +7,7 @@ they share `@restatedev/restate-sdk-core`'s contracts.
 | | promise SDK | `restate-sdk-gen` | thin Effect binding | **this package** |
 |---|---|---|---|---|
 | Handler shape | `async (ctx, input)` | `function* (input)` | `(input) => Effect` | `(input) => Effect` |
-| Durable step | `ctx.run(...)` | `yield* run(...)` | `Restate.run(...)` | `restate.run(...)` |
+| External activity | `ctx.run(...)` | `yield* run(...)` | `Restate.run(...)` | `effect.pipe(restate.activity(...))` |
 | Concurrency over durable ops | `RestatePromise.all/race/any` | `all` / `race` / `any` / `select` / `spawn` | **banned**; descriptor combinators + lint | native `Effect.all` / `race` / `forkChild` / `forEach` |
 | Durable sleep | `ctx.sleep(d)` | `yield* sleep(d)` | `Restate.sleep(d)` | `Effect.sleep(d)` |
 | Durable timeout | `promise.orTimeout(d)` | `race([work, sleep])` | `Restate.timeout` | `Effect.timeout(d)` |
@@ -49,6 +49,8 @@ function of journaled decisions rather than of timing (see
   primitives, because the invocation's `Clock` is journaled;
 - one `Layer` for application services, one journaled `Clock`/`Random`/`Logger`
   per invocation;
+- a pipeable `restate.activity` boundary that journals typed failures while
+  leaving defects to Restate's technical retry policy;
 - a runtime check that catches the one remaining user error (raw async in
   handler code) instead of leaving it to a lint rule.
 
@@ -76,9 +78,9 @@ That is a different layer from this package, not a competitor to it:
 
 - **Effect's Workflow API** asks you to write in a workflow vocabulary —
   workflows, activities, durable deferreds — and can then run on any engine.
-- **This package** makes *plain Effect* durable: no activities, no engine, no
-  new nouns. `Effect.sleep` is the timer, `Effect.retry` is the retry,
-  `Effect.forkChild` is the background task.
+- **This package** makes *plain Effect* durable. Its `activity` operator is only
+  the external-I/O boundary; `Effect.sleep` is still the timer, `Effect.retry`
+  is the domain retry, and `Effect.forkChild` is the background task.
 
 The two could meet: a `WorkflowEngine` implementation backed by Restate is a
 plausible separate package (`register` → a Restate workflow service,
